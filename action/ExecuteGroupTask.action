@@ -1,0 +1,17 @@
+string mission_id
+string group_id
+string command_id
+string command
+float32 timeout_s
+string leader_id
+tcp_to_ros/TaskAssignment[] assignments
+---
+string final_status
+string[] completed_uavs
+string[] failed_uavs
+string error_code
+string message
+---
+string phase
+string[] active_uavs
+string detail

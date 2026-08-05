@@ -1,0 +1,36 @@
+defaults:
+  accept_delay_s: 0.1
+  result_delay_s: 0.5
+  send_accepted_feedback: true
+  final_status: COMPLETED
+  failed_uavs: []
+  error_code: MOCK_BACKEND
+  message: mock task finished
+
+command_overrides:
+  MOVE_TO:
+    message: mock MOVE_TO completed
+  FOLLOW_ROUTE:
+    result_delay_s: 1.0
+    message: mock FOLLOW_ROUTE completed
+  FAULT_EXIT:
+    result_delay_s: 0.8
+    message: mock FAULT_EXIT completed
+  HOVER:
+    message: mock HOVER completed
+
+# 调试示例：
+# 1. 模拟 FAILED：
+# command_overrides:
+#   FAULT_EXIT:
+#     final_status: FAILED
+#     failed_uavs: [A10]
+#     error_code: MOCK_FAULT_EXIT_FAILED
+#     message: mock FAULT_EXIT failed on A10
+#
+# 2. 模拟 ACCEPTED 超时：
+# command_overrides:
+#   FOLLOW_ROUTE:
+#     send_accepted_feedback: false
+#     final_status: TIMEOUT
+#     message: mock FOLLOW_ROUTE waiting forever

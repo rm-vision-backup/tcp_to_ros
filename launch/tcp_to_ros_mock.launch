@@ -1,0 +1,24 @@
+<launch>
+  <arg name="host" default="0.0.0.0" />
+  <arg name="port" default="39001" />
+  <arg name="action_name" default="/group_a/execute_task" />
+  <arg name="state_topic" default="/group_a/group_task_state" />
+  <arg name="emergency_hold_service" default="/group_a/emergency_hold" />
+  <arg name="mock_config" default="$(find tcp_to_ros)/config/mock_backend.yaml" />
+
+  <rosparam command="load" file="$(arg mock_config)" />
+
+  <node pkg="tcp_to_ros" type="mock_backend_node.py" name="mock_backend_node" output="screen">
+    <param name="action_name" value="$(arg action_name)" />
+    <param name="state_topic" value="$(arg state_topic)" />
+    <param name="emergency_hold_service" value="$(arg emergency_hold_service)" />
+  </node>
+
+  <node pkg="tcp_to_ros" type="tcp_server_node.py" name="tcp_server_node" output="screen">
+    <param name="host" value="$(arg host)" />
+    <param name="port" value="$(arg port)" />
+    <param name="action_name" value="$(arg action_name)" />
+    <param name="state_topic" value="$(arg state_topic)" />
+    <param name="emergency_hold_service" value="$(arg emergency_hold_service)" />
+  </node>
+</launch>

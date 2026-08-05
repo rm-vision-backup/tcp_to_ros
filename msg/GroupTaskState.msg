@@ -1,0 +1,9 @@
+string mission_id
+string command_id
+string command
+string tcp_status
+string ros_status
+string[] active_uavs
+string[] completed_uavs
+string[] failed_uavs
+string detail
