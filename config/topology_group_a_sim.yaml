@@ -1,0 +1,61 @@
+# Group A 多 Master 仿真拓扑 (GCS_A + UAV1..UAV3)
+# 属于 tcp_to_ros 地面站主功能包的联调配置：GCS_A 侧与 UAV* 机载侧
+# 都通过通用包 swarm_topology_bridge 的 bridge_node 加载本配置。
+#
+# 启动方式 (每个 ROS Master 一个终端):
+#   export ROS_MASTER_URI=http://localhost:11311
+#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV1
+#   export ROS_MASTER_URI=http://localhost:11312
+#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV2
+#   export ROS_MASTER_URI=http://localhost:11313
+#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV3
+#   export ROS_MASTER_URI=http://localhost:11314
+#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A
+#
+# 端口规划:
+#   - Topic PUB:   base_port + topic_idx + port_offset
+#   - Service ROUTER: service_base_port + port_offset
+#   GCS_A: port_offset=0,  UAV1: port_offset=100, UAV2: port_offset=200, UAV3: port_offset=300
+#
+# 实机部署: 各 UAV 使用物理 IP 且 port_offset 全为 0。
+#
+# 命名约定:
+#   - 机载 mock/执行适配层发布全局 Topic /uav_task_state (bridge 订阅该名)
+#   - 机载提供 /UAV{n}/uav_task 与 /UAV{n}/uav_hold Service
+#   - GCS_A 侧 bridge 把收到的状态发布为 /UAV{n}/uav_task_state, 供 GCS_A backend 订阅
+
+uavs:
+  - {name: GCS_A, ip: 127.0.0.1, port_offset: 0}
+  - {name: UAV1, ip: 127.0.0.1, port_offset: 100}
+  - {name: UAV2, ip: 127.0.0.1, port_offset: 200}
+  - {name: UAV3, ip: 127.0.0.1, port_offset: 300}
+
+topics:
+  # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
+  - {name: uav_task_state, type: tcp_to_ros/UavTaskState, max_freq: 0}
+
+max_freq: 0
+base_port: 4000
+
+# Topic 桥拓扑: topology[my_name] 表示本机接收这些源的状态 Topic。
+# 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间不需要互收状态。
+topology:
+  GCS_A: [UAV1, UAV2, UAV3]
+  UAV1: []
+  UAV2: []
+  UAV3: []
+
+# 通用 Service 代理 (所有节点加载同一份完整列表, 按 target 判断角色):
+#   - name 为跨机唯一 Service 名
+#   - target 为提供该 Service 的节点
+#   - 本机是 target 时: 绑定 ROUTER, 调用本机同名 ROS Service 返回响应
+#   - 本机不是 target 时: 注册本地同名 ROS Service 代理, 转发到 target
+services:
+  - {name: /UAV1/uav_task, type: tcp_to_ros/UavTask, target: UAV1}
+  - {name: /UAV1/uav_hold, type: tcp_to_ros/UavHold, target: UAV1}
+  - {name: /UAV2/uav_task, type: tcp_to_ros/UavTask, target: UAV2}
+  - {name: /UAV2/uav_hold, type: tcp_to_ros/UavHold, target: UAV2}
+  - {name: /UAV3/uav_task, type: tcp_to_ros/UavTask, target: UAV3}
+  - {name: /UAV3/uav_hold, type: tcp_to_ros/UavHold, target: UAV3}
+
+service_base_port: 14000

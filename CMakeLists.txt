@@ -44,6 +44,7 @@ catkin_package(
     message_runtime
     rospy
     std_msgs
+    swarm_topology_bridge
 )
 
 catkin_install_python(PROGRAMS
