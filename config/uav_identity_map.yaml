@@ -1,0 +1,27 @@
+# Group A 任务层身份 -> 执行层身份映射
+# 任务层身份: A01 ... A15
+# 执行层身份: UAV1 ... UAV15 / hostname
+#
+# 注意: 本文件为待复核配置。正式实机使用前必须人工复核
+#       exec_target / hostname / ip 与现场实际一致。
+# 仿真(单机多 Master)时使用 127.0.0.1 + port_offset, 见 swarm_topology_bridge 配置。
+
+protocol_version: "1.0"
+group_id: "GroupA"
+
+uavs:
+  - { uav_id: "A01", exec_target: "UAV1",  hostname: "uav1",  ip: "192.168.5.11",  enabled: true }
+  - { uav_id: "A02", exec_target: "UAV2",  hostname: "uav2",  ip: "192.168.5.12",  enabled: true }
+  - { uav_id: "A03", exec_target: "UAV3",  hostname: "uav3",  ip: "192.168.5.13",  enabled: true }
+  - { uav_id: "A04", exec_target: "UAV4",  hostname: "uav4",  ip: "192.168.5.14",  enabled: true }
+  - { uav_id: "A05", exec_target: "UAV5",  hostname: "uav5",  ip: "192.168.5.15",  enabled: true }
+  - { uav_id: "A06", exec_target: "UAV6",  hostname: "uav6",  ip: "192.168.5.16",  enabled: true }
+  - { uav_id: "A07", exec_target: "UAV7",  hostname: "uav7",  ip: "192.168.5.17",  enabled: true }
+  - { uav_id: "A08", exec_target: "UAV8",  hostname: "uav8",  ip: "192.168.5.18",  enabled: true }
+  - { uav_id: "A09", exec_target: "UAV9",  hostname: "uav9",  ip: "192.168.5.19",  enabled: true }
+  - { uav_id: "A10", exec_target: "UAV10", hostname: "uav10", ip: "192.168.5.20",  enabled: true }
+  - { uav_id: "A11", exec_target: "UAV11", hostname: "uav11", ip: "192.168.5.21",  enabled: true }
+  - { uav_id: "A12", exec_target: "UAV12", hostname: "uav12", ip: "192.168.5.22",  enabled: true }
+  - { uav_id: "A13", exec_target: "UAV13", hostname: "uav13", ip: "192.168.5.23",  enabled: true }
+  - { uav_id: "A14", exec_target: "UAV14", hostname: "uav14", ip: "192.168.5.24",  enabled: true }
+  - { uav_id: "A15", exec_target: "UAV15", hostname: "uav15", ip: "192.168.5.151", enabled: true }

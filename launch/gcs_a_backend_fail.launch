@@ -1,0 +1,59 @@
+<launch>
+  <arg name="map_file" default="$(find tcp_to_ros)/config/uav_identity_map.yaml" />
+  <arg name="confirm_wait_s" default="1.0" />
+  <arg name="confirm_retries" default="2" />
+  <arg name="confirm_retry_interval_s" default="0.2" />
+  <arg name="confirm_deadline_s" default="4.0" />
+
+  <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
+    <param name="action_name" value="/group_a/execute_task" />
+    <param name="emergency_hold_service" value="/group_a/emergency_hold" />
+    <param name="map_file" value="$(arg map_file)" />
+    <param name="confirm_wait_s" value="$(arg confirm_wait_s)" />
+    <param name="confirm_retries" value="$(arg confirm_retries)" />
+    <param name="confirm_retry_interval_s" value="$(arg confirm_retry_interval_s)" />
+    <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
+  </node>
+
+  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav1_mock" output="screen">
+    <param name="exec_target" value="UAV1" />
+    <param name="uav_id" value="A01" />
+    <rosparam param="defaults">
+      accept_delay_s: 0.1
+      result_delay_s: 25.0
+      accept: true
+      final_status: COMPLETED
+      error_code: ""
+      message: mock uav1 task finished
+      publish_interval_s: 0.5
+    </rosparam>
+  </node>
+
+  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav2_mock" output="screen">
+    <param name="exec_target" value="UAV2" />
+    <param name="uav_id" value="A02" />
+    <rosparam param="defaults">
+      accept_delay_s: 0.1
+      result_delay_s: 0.5
+      accept: true
+      final_status: FAILED
+      error_code: MOCK_UAV2_FAIL
+      message: uav2 mock failed
+      publish_interval_s: 0.5
+    </rosparam>
+  </node>
+
+  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav3_mock" output="screen">
+    <param name="exec_target" value="UAV3" />
+    <param name="uav_id" value="A03" />
+    <rosparam param="defaults">
+      accept_delay_s: 0.1
+      result_delay_s: 25.0
+      accept: true
+      final_status: COMPLETED
+      error_code: ""
+      message: mock uav3 task finished
+      publish_interval_s: 0.5
+    </rosparam>
+  </node>
+</launch>

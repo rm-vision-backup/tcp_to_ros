@@ -1,0 +1,20 @@
+<launch>
+  <!-- GCS_A 本地整组分发后端: 接收 ExecuteGroupTask Action, 按身份映射并发分发到各 UAV -->
+  <arg name="action_name" default="/group_a/execute_task" />
+  <arg name="emergency_hold_service" default="/group_a/emergency_hold" />
+  <arg name="map_file" default="$(find tcp_to_ros)/config/uav_identity_map.yaml" />
+  <arg name="confirm_wait_s" default="1.0" />
+  <arg name="confirm_retries" default="2" />
+  <arg name="confirm_retry_interval_s" default="0.2" />
+  <arg name="confirm_deadline_s" default="4.0" />
+
+  <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
+    <param name="action_name" value="$(arg action_name)" />
+    <param name="emergency_hold_service" value="$(arg emergency_hold_service)" />
+    <param name="map_file" value="$(arg map_file)" />
+    <param name="confirm_wait_s" value="$(arg confirm_wait_s)" />
+    <param name="confirm_retries" value="$(arg confirm_retries)" />
+    <param name="confirm_retry_interval_s" value="$(arg confirm_retry_interval_s)" />
+    <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
+  </node>
+</launch>

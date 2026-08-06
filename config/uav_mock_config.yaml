@@ -1,0 +1,13 @@
+# UAV mock 执行适配层策略配置
+# 每个 UavMockNode 读取 ~defaults 与 ~command_overrides。
+# 用于单 Master 联调(多 UAV mock 与 GCS_A 同 Master)，验证
+# Service 确认、状态聚合、幂等、HOLD、失败即停等语义。
+
+uav_mock_defaults:
+  accept_delay_s: 0.1
+  result_delay_s: 0.5
+  accept: true
+  final_status: COMPLETED
+  error_code: ""
+  message: mock uav task finished
+  publish_interval_s: 0.5

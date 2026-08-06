@@ -16,11 +16,14 @@ add_message_files(
   GroupTaskState.msg
   Pose3DYaw.msg
   TaskAssignment.msg
+  UavTaskState.msg
 )
 
 add_service_files(
   FILES
   EmergencyHold.srv
+  UavHold.srv
+  UavTask.srv
 )
 
 add_action_files(
@@ -47,6 +50,8 @@ catkin_install_python(PROGRAMS
   scripts/tcp_server_node.py
   scripts/mock_backend_node.py
   scripts/task_event_injector.py
+  scripts/gcs_a_backend_node.py
+  scripts/uav_mock_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -1,0 +1,12 @@
+string protocol_version
+string mission_id
+string command_id
+string uav_id
+string exec_target
+string command
+string status
+uint32 status_seq
+string detail_stage
+string error_code
+string message
+float64 reported_at

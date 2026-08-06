@@ -1,0 +1,10 @@
+string protocol_version
+string mission_id
+string command_id
+string uav_id
+string exec_target
+string reason
+---
+bool accepted
+string error_code
+string message
