@@ -176,19 +176,23 @@ source ~/.bashrc
 source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
 cd /home/ub20tg/catkin_swarm6-2
 
-# ① 正常整组 MOVE_TO → 期望 COMPLETED
+# 1. 正常整组 MOVE_TO → 期望 COMPLETED
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
   --timeout 15 --expect COMPLETED
 
-# ② 相同 command_id 再发一次 → 期望仍 COMPLETED（幂等，不重新执行）
+# 2. 相同 command_id 再发一次 → 期望仍 COMPLETED（幂等，不重新执行）
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
   --timeout 15 --expect COMPLETED
+```
 
-# ③ 失败即停：先 Ctrl-C 停掉终端 1 的 gcs_a_backend_test.launch
-#    再改用注入 UAV2 失败的 launch（UAV2 mock final_status=FAILED，UAV1/UAV3 慢执行）
-#    注意：必须停掉前一个 launch，否则端口/节点冲突
+**终端1**
+
+```bash
+# 3. 失败即停：改用注入 UAV2 失败的 launch（UAV2 mock final_status=FAILED，UAV1/UAV3 慢执行）
 roslaunch tcp_to_ros gcs_a_backend_fail.launch
-#    另开（或复用）测试终端，期望 FAILED
+```
+**终端2**
+```bash
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-001 \
   --timeout 15 --expect FAILED
 ```
@@ -197,8 +201,8 @@ python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-0
 
 **预期输出**：
 
-- ①② 均打印 `RESULT_FINAL=COMPLETED`、`RESULT_COMPLETED=A01,A02,A03`（正常整组 + 重复幂等）；
-- ③ 打印 `RESULT_FINAL=FAILED`、`RESULT_FAILED=A02`、`RESULT_ERROR=MOCK_UAV2_FAIL`，且 GCS_A 对活动 UAV（A01/A03）下发 HOLD 并逐机确认。
+- 1、2 均打印 `RESULT_FINAL=COMPLETED`、`RESULT_COMPLETED=A01,A02,A03`（正常整组 + 重复幂等）；
+- 3 打印 `RESULT_FINAL=FAILED`、`RESULT_FAILED=A02`、`RESULT_ERROR=MOCK_UAV2_FAIL`，且 GCS_A 对活动 UAV（A01/A03）下发 HOLD 并逐机确认。
 
 ### 单 Master 测试结果
 
