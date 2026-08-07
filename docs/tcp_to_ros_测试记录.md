@@ -34,9 +34,9 @@
 - 启动方式：
   - `roslaunch tcp_to_ros tcp_to_ros_mock.launch`
 
-## 测试方法
+## 测试步骤
 
-### 正向测试（A 组六批次）
+### 正向测试方法
 
 目的：验证 `tcp_to_ros` 是否正确承接 Group A 的 6 个 TCP 任务、mock backend 与 Action/Topic/Service 主链路，并让 `references/runtime/task_test.py` 返回 `SUCCESS`。
 
@@ -67,7 +67,19 @@ python3 references/runtime/task_test.py --backend tcp --group A --task hold-end 
 
 预期：每条命令退出码为 `0`、输出 JSON 的 `status` 为 `SUCCESS`、`failed_robot_ids` 为空。
 
-### 负向测试
+### 正向测试结果
+
+| 测试项 | 预期 | 实际结果 | 是否通过 | roslaunch log |
+|---|---|---|---|---|
+| prepare | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 37994)` |
+| coverage-segment-1 | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 48054)` |
+| fault-exit | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38084)` |
+| recovery | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38606)` |
+| coverage-segment-2 | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 54030)` |
+| hold-end | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38308)` |
+
+
+### 负向测试方法
 
 目的：验证协议拒绝路径、`command_id` 去重缓存与 `HOLD` 对活动任务的打断逻辑。
 
@@ -93,20 +105,7 @@ python3 src/tcp_to_ros/test/test_hold_interrupt.py
 | `test_duplicate_command.py` | 退出码 `0`；第一次 `ACCEPTED`，第二次 `COMPLETED`，第三次缓存终态 `COMPLETED` |
 | `test_hold_interrupt.py` | 退出码 `0`；`FOLLOW_ROUTE` 先 `ACCEPTED`，`HOLD` 返回 `COMPLETED`，原任务再次查询返回 `FAILED` 且 `error_code=COMMAND_HELD` |
 
-## 正向测试结果
-
-### A 组六批次任务
-
-| 测试项 | 预期 | 实际结果 | 是否通过 | roslaunch log |
-|---|---|---|---|---|
-| prepare | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 37994)` |
-| coverage-segment-1 | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 48054)` |
-| fault-exit | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38084)` |
-| recovery | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38606)` |
-| coverage-segment-2 | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 54030)` |
-| hold-end | `SUCCESS` | `SUCCESS` | 是 | `accepted runtime connection from ('127.0.0.1', 38308)` |
-
-## 负向测试结果
+### 负向测试结果
 
 | 测试项 | 预期 | 实际结果 | 是否通过 | roslaunch log |
 |---|---|---|---|---|
@@ -143,9 +142,12 @@ python3 src/tcp_to_ros/test/test_hold_interrupt.py
 4. 单机状态回传字段；
 5. `swarm_topology_bridge` 的 Group A 地面站拓扑配置。
 
-## Phase 1-3 集成验证记录（本会话）
+---
+---
 
-### 范围
+# Phase 1-3 集成验证记录（本会话）
+
+## 测试范围
 
 在上一轮 mock 闭环基线之上，验证 GCS_A 整组分发后端、单机 mock 执行适配层与跨 Master Service 代理：
 
@@ -153,9 +155,11 @@ python3 src/tcp_to_ros/test/test_hold_interrupt.py
 - `src/tcp_to_ros/scripts/uav_mock_node.py`
 - `src/swarm_topology_bridge/scripts/bridge_node.py`（Topic 限频修正 + Service 代理）
 
-### 测试方法
+## 测试步骤
 
-**单 Master 语义联调**：启动 GCS_A 后端 + UAV1..3 mock：
+### 单 Master 语义联调 测试方法
+
+启动 GCS_A 后端 + UAV1..3 mock：
 
 ```bash
 source ~/.bashrc
@@ -179,11 +183,7 @@ python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-0
 
 预期：前两次 `RESULT_FINAL=COMPLETED`（completed=A01,A02,A03）；失败场景 `RESULT_FINAL=FAILED`、failed_uavs=A02、error=`MOCK_UAV2_FAIL`。
 
-**双 Master 跨机 Service 代理**：先清理上述 launch，再按 GCS_A / UAV1 两个 Master 启动桥与 mock，最后在 GCS_A Master 上 `rosservice call /UAV1/uav_task` 验证跨 Master 转发（见下）。
-
-### 单 Master 语义联调
-
-环境：`roslaunch tcp_to_ros gcs_a_backend_test.launch`（GCS_A 后端 + UAV1..3 mock）。
+### 单 Master 测试结果
 
 | 场景 | 预期 | 实际结果 | 是否通过 |
 |---|---|---|---|
@@ -191,16 +191,70 @@ python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-0
 | 重复 `command_id` | 返回缓存 `COMPLETED`，不重新执行 | 第二次仍 `COMPLETED`（UAV 幂等缓存 + GCS_A ACCEPTED 前终态缓冲回放）| 是 |
 | 单机失败即停 | 整组 `FAILED`，failed_uavs=A02，错误码透传，活动 UAV 被 HOLD | `RESULT_FINAL=FAILED`，failed_uavs=A02，error=`MOCK_UAV2_FAIL`，A01/A03 HOLD 确认成功 | 是 |
 
-### 双 Master 跨机 Service 代理
 
-环境：`topology_group_a_sim.launch`，GCS_A Master=11311，UAV1 Master=11312。
+### 多 Master 跨机 Service 代理 测试方法
+
+先停掉上一节的单 Master launch（`Ctrl-C`），再开两个终端分别作为 UAV1 与 GCS_A 的 Master。关键点：每个 Master 各自 `source` 并设置 `ROS_MASTER_URI`；UAV1 以 `uav_name:=UAV1` 启动（bridge + 机载 mock 一起），GCS_A 以 `run_uav_mock:=false` 启动（只跑 bridge），并**再单独**启动 GCS_A 分发后端 `gcs_a_backend.launch`。
+
+**终端 1（UAV1 机载 Master，端口 11312）：**
+
+```bash
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+export ROS_MASTER_URI=http://localhost:11312
+roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV1 uav_id:=A01
+```
+
+**终端 2（GCS_A 地面站 Master，端口 11311）：**
+
+```bash
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+export ROS_MASTER_URI=http://localhost:11311
+
+# 1) GCS_A 侧桥（仅 bridge；机载 mock 由 UAV1 终端提供）
+roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=false
+# 2) 另起 GCS_A 分发后端（同 Master；因上面 roslaunch 占用前台，另开终端 shell: 保持 ROS_MASTER_URI 后再启动）
+roslaunch tcp_to_ros gcs_a_backend.launch
+```
+
+**验证（在 GCS_A Master，即终端 2 所在）另开终端：**
+
+```bash
+export ROS_MASTER_URI=http://localhost:11311
+# 应见 6 个代理：/UAV1..3/uav_task 与 /UAV1..3/uav_hold
+rosservice list | grep uav_                  # 或 rosservice list | grep -E "uav_task|uav_hold"
+# 跨 Master 调用 UAV1 的 uav_task，应返回 accepted=True / status=ACCEPTED
+rosservice call /UAV1/uav_task "protocol_version: '1.0'
+mission_id: 'mm-001'
+group_id: 'GroupA'
+command_id: 'mm-cmd-001'
+uav_id: 'A01'
+exec_target: 'UAV1'
+command: 'MOVE_TO'
+timeout_s: 10.0
+leader_id: ''
+assignment:
+  uav_id: 'A01'
+  formation_follow: false
+  target_id: ''
+  target_pose: {x: 1.0, y: 2.0, z: 3.0, yaw: 0.0}
+  waypoints: []"
+```
+
+**预期**：
+
+- `rosservice list` 在 GCS_A Master 上列出 `/UAV1..3/uav_task`、`/UAV1..3/uav_hold` 六个代理（bridge 按 `topology_group_a_sim.yaml` 的 `services` 声明动态注册）；
+- `rosservice call /UAV1/uav_task` 经 GCS_A→bridge DEALER→ZMQ→UAV1 ROUTER→uav_mock_node 返回 `success: True`、`status: ACCEPTED`（即下表「多 Master 跨机 测试结果」中的 `accepted: True / status=ACCEPTED`）。
+
+### 多 Master 跨机 测试结果
 
 | 场景 | 预期 | 实际结果 | 是否通过 |
 |---|---|---|---|
 | GCS_A bridge 注册 `/UAV1..3/uav_task`、`/UAV1..3/uav_hold` 代理 | 6 个 Service 代理可用 | `rosservice list` 显示全部 6 个代理 | 是 |
 | GCS_A `rosservice call /UAV1/uav_task` | 转发到 UAV1 mock，返回 accepted=true | `accepted: True`，status=`ACCEPTED` | 是 |
 
-### 过程中修复的问题
+## 过程中修复的问题
 
 1. rospy `ServiceProxy` 无原生调用超时且不允许位置+关键字混用：改为工作线程 + Event 软超时。
 2. 幂等重复请求的缓存终态可能早于 `accepted_sent`：GCS_A 缓冲 ACCEPTED 前到达的终态并在 ACCEPTED 后回放。
@@ -209,7 +263,7 @@ python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-0
 5. bridge Service 载荷反序列化：`genpy.Message.deserialize` 需 bytes，不能用 `BytesIO`。
 6. 依赖方向修正：`swarm_topology_bridge` 为通用包，移除其对 `tcp_to_ros` 的依赖；Group A 联调示例移入 `tcp_to_ros` 包；`tcp_to_ros`/`safe_valley_exp` 依赖 `swarm_topology_bridge`。
 
-### 待后续覆盖
+## 待后续覆盖
 
 - 状态 Topic 跨 Master 转发（UAV 状态经 bridge 到 GCS_A 聚合）完整闭环；
 - 完整 4 秒确认边界（慢确认拒绝/重试耗尽）；
