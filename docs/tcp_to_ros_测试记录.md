@@ -131,6 +131,6 @@
 
 ## 关联文档
 
-- 测试步骤：`/home/ub20tg/catkin_swarm6-2/docs/tcp_to_ros_测试步骤.md`
-- 工程过程：`/home/ub20tg/catkin_swarm6-2/docs/tcp_to_ros_工程过程.md`
-- 后续开发计划：`/home/ub20tg/catkin_swarm6-2/docs/tcp_to_ros_后续开发计划.md`
+- 测试步骤：`tcp_to_ros_测试步骤.md`
+- 工程过程：`tcp_to_ros_工程过程.md`
+- 后续开发计划：`tcp_to_ros_后续开发计划.md`

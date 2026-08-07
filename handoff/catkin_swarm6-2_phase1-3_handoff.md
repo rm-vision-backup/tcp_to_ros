@@ -1,14 +1,14 @@
 # catkin_swarm6-2 Phase 1-3 交接
 
 > 交接日期：Phase 1/2/3 已实施并通过集成验证。本文件为下一会话交接参数；
-> 领域术语见 `CONTEXT.md`，Phase 编号与接口/聚合/超时约束以 `docs/tcp_to_ros_后续开发计划.md` 为唯一权威。
+> 领域术语见 `../CONTEXT.md`，Phase 编号与接口/聚合/超时约束以 `../docs/tcp_to_ros_后续开发计划.md` 为唯一权威。
 
 ## 当前状态
 
 - Phase 1（接口与映射冻结）、Phase 2（GCS_A 分发与汇总）、Phase 3（bridge 扩展与 Group A 拓扑）已实施；
 - 单 Master 语义联调通过：正常整组 `COMPLETED`、重复 `command_id` 幂等、失败即停 + HOLD 确认；
 - 双 Master 跨机 Service 冒烟通过：GCS_A `rosservice call /UAV1/uav_task` → UAV1 mock 返回 `accepted: True`；
-- 详细验证结果见 `docs/tcp_to_ros_测试记录.md`。
+- 详细验证结果见 `../docs/tcp_to_ros_测试记录.md`。
 
 ## 已冻结决策（摘要）
 
@@ -29,7 +29,7 @@
 
 1. 完善 Phase 5 仿真联调：状态 Topic 跨 Master 完整聚合闭环、4 秒确认边界端到端、cancel/TCP 断线 HOLD、弱网/重连下的超时与迟响应；
 2. 待覆现场确认：实机 IP/hostname、A01-A15 映射复核（当前为待复核配置）；
-3. 后续路线见 `docs/tcp_to_ros_后续开发计划.md` 的 Phase 4-6。
+3. 后续路线见 `../docs/tcp_to_ros_后续开发计划.md` 的 Phase 4-6。
 
 ## Suggested skills
 

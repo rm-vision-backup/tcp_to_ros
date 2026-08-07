@@ -4,7 +4,7 @@
 
 在 `src/tcp_to_ros` 新建 Python ROS1 Noetic 功能包，作为 Group A 地面站主包，对接 `references/runtime` 的 TCP client，完成协议适配与整组任务分发验证。
 
-> Phase 编号约定：本文档不自行定义 Phase 编号；文中"对应 Phase N"一律指 `docs/tcp_to_ros_后续开发计划.md` 的 Phase N（1 接口与映射冻结、2 GCS_A 分发与汇总、3 bridge 扩展、4 机载执行适配层、5 仿真联调、6 实机联调）。
+> Phase 编号约定：本文档不自行定义 Phase 编号；文中"对应 Phase N"一律指 `tcp_to_ros_后续开发计划.md` 的 Phase N（1 接口与映射冻结、2 GCS_A 分发与汇总、3 bridge 扩展、4 机载执行适配层、5 仿真联调、6 实机联调）。
 
 ## 阶段一至四：第一版 mock 闭环（已完成）
 
@@ -22,7 +22,7 @@
 - 全结构化字段、唯一键 `(mission_id, command_id, uav_id)`、至少一次请求 + UAV 幂等执行 + `ALL` 失败即停；
 - 并发确认参数：单次 1.0 秒、首次 + 2 次重试、间隔 0.2 秒、最迟 4 秒形成整组 `ACCEPTED/FAILED`；整组 `ACCEPTED` 仅在全部 `accepted=true` 后发送。
 
-详细依据见 `docs/tcp_to_ros_后续开发计划.md`。
+详细依据见 `tcp_to_ros_后续开发计划.md`。
 
 ## 阶段六，对应 Phase 1：接口与映射冻结
 
@@ -67,4 +67,4 @@
 
 - 只使用 `catkin build`，默认 `build/devel/logs`；基础环境 `source ~/.bashrc`，构建后额外 `source /home/ub20tg/catkin_swarm6-2/devel/setup.bash`；
 - 当前 Agent 环境对 `~/.ros` 写入有限制，联调使用工作区内 `ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home`、`ROS_LOG_DIR=.../.ros_home/log`；
-- 详细验证结果见 `docs/tcp_to_ros_测试记录.md`。
+- 详细验证结果见 `tcp_to_ros_测试记录.md`。

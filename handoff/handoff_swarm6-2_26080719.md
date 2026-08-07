@@ -2,7 +2,7 @@
 
 > 生成时间：2026-08-07 19:28（Asia/Shanghai）。
 > 交接属性：`tcp_to_ros` 主包本轮功能已回归验证通过；仓库结构与历史已同步调整。
-> 领域术语见 `CONTEXT.md`，Phase 编号与接口/聚合/超时约束以 `docs/tcp_to_ros_后续开发计划.md` 为唯一权威。
+> 领域术语见 `../CONTEXT.md`，Phase 编号与接口/聚合/超时约束以 `../docs/tcp_to_ros_后续开发计划.md` 为唯一权威。
 
 ## 当前状态
 
@@ -11,7 +11,7 @@
   - 重复 `command_id` → 返回缓存 `COMPLETED`（幂等，UAV 幂等缓存 + GCS_A ACCEPTED 前终态缓冲回放）；
   - 整组失败即停 → `FAILED` / failed_uavs=A02 / error=`MOCK_UAV2_FAIL`，活动 UAV（A01/A03）被 HOLD 逐机确认。
 - 双 Master 跨机 Service 冒烟此前已通过：GCS_A `rosservice call /UAV1/uav_task` → UAV1 mock 返回 `accepted: True`。
-- 详细验证结果见 `docs/tcp_to_ros_测试记录.md`（含本会话「过程修复问题」与「待后续覆盖」）。
+- 详细验证结果见 `../docs/tcp_to_ros_测试记录.md`（含本会话「过程修复问题」与「待后续覆盖」）。
 
 ## 包关系现状
 
@@ -37,7 +37,7 @@
 
 1. 完善 Phase 5 仿真联调：状态 Topic 跨 Master 完整聚合闭环、4 秒确认边界端到端、cancel/TCP 断线触发 HOLD、弱网/重连下的 bridge Service 代理超时与迟响应；
 2. 待现场确认：实机 IP/hostname、A01-A15 映射复核（当前为待复核配置，hostname 已统一为大写 UAV1..UAV15）；
-3. 后续路线见 `docs/tcp_to_ros_后续开发计划.md` 的 Phase 4-6。
+3. 后续路线见 `../docs/tcp_to_ros_后续开发计划.md` 的 Phase 4-6。
 
 ## Suggested skills
 
