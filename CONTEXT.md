@@ -1,0 +1,91 @@
+# Context Glossary
+
+> 本文件是项目领域词汇表，只解释概念、不承载文件路径、实现算法与验证参数。
+> - 方案与接口/聚合/超时约束：`docs/tcp_to_ros_后续开发计划.md`（Phase 编号唯一权威）
+> - 进度与已落地内容：`docs/tcp_to_ros_工程过程.md`
+> - 验证结果：`docs/tcp_to_ros_测试记录.md`
+> - 问题与结论历史：`docs/tcp_to_ros_提问记录.md`
+> - 会话交接参数：`handoff/*`
+> - 包关系：`tcp_to_ros` 为 GCS_A 地面站主包（本仓跟踪）；`swarm_topology_bridge` 为通用通信包（本仓 submodule，services 分支）；`safe_valley_exp` 为机载应用示例，已从本仓 submodule 中剔除、作为独立功能包维护，其桥接依赖走 `swarm_topology_bridge` 的 master 分支。
+
+## Group A
+
+本轮开发只指 A 组地面站与 A 组无人机任务链路，不包含 Group B。
+
+## 整组批次任务
+
+指 runtime 发给地面站的一次 Group A 批次命令。当前默认抽象为 6 个批次：`prepare-a`、`coverage-segment-1`、`fault-exit`、`recovery-a`、`coverage-segment-2`、`hold-a-end`。
+
+整组批次任务不是逐机独立长会话。
+
+## assignments
+
+指整组批次任务内部的逐机任务项集合。地面站负责把 `assignments` 拆分为单机任务下发，并汇总单机状态。
+
+## 分发层
+
+指地面站与机载之间负责"任务下发 + 状态回传 + 整组汇总"的 ROS 通信层。不负责轨迹规划、编队形成、运动控制实现。
+
+## 作业类型
+
+指 `MOVE_TO`、`FOLLOW_ROUTE`、`FAULT_EXIT`、`HOVER` 这类任务类型。在分发层只表示任务类别，不表示具体算法实现。
+
+## 统一任务接口
+
+指地面站向单架无人机下发任务时采用统一的业务模型，通过 `command` 区分作业类型，而不是为每类作业定义独立的跨机接口。任务请求需要获得明确的接收确认，执行过程和终态通过单机状态回传。
+
+## 接收确认
+
+指单机任务已经通过校验、完成幂等登记，并成功交给本机执行入口。仅收到网络数据不构成接收确认。
+
+## 混合跨机通信
+
+指 GCS_A 与执行身份之间采用两类互补通信：任务请求和安全请求使用同步请求响应，执行过程与终态使用异步状态流。整组任务生命周期仍由 GCS_A 本地接口管理。
+
+## 幂等任务
+
+指具有相同任务唯一键的重复请求只能对应同一次实际执行。执行端需要返回当前状态或缓存结果，不得重复启动任务。
+
+## 失败即停
+
+指采用 `ALL` 完成策略时，任一参与机明确拒绝任务或无法完成接收确认，整组任务立即失败，并安全停止已经接受该任务的参与机。
+
+## 单机状态三态
+
+指单架无人机回传给地面站的主状态：`ACCEPTED`、`COMPLETED`、`FAILED`。`COMPLETED` 与 `FAILED` 为终态；允许附带细节字段（如 `detail_stage`、`message`、`error_code`）。
+
+## 任务层身份
+
+指任务包中使用的无人机身份命名，例如 `A01 ... A15`。
+
+## 执行身份
+
+指机载实际运行时的节点身份，例如 `UAV1 ... UAV15` 或对应 hostname。任务层身份与执行身份通过配置映射，不直接混用。
+
+## 单机任务接口
+
+指地面站向单架 UAV 下发统一任务请求的跨机 Service（`UavTask.srv`）。请求字段为全结构化 ROS 字段，不使用 `payload_json`；响应 `accepted=true` 表示任务已通过校验、完成幂等登记并交给本机执行入口，不表示任务已完成。
+
+## 单机 HOLD 接口
+
+指地面站向单架 UAV 请求安全悬停的跨机 Service（`UavHold.srv`）。稳定悬停完成后通过单机状态 Topic 报告终态。
+
+## 单机状态消息
+
+指单架 UAV 通过跨机 Topic 回传给地面站的执行状态（`UavTaskState.msg`）。主状态为单机状态三态；GCS_A 按任务唯一键与 `status_seq` 去重。
+
+## 身份映射
+
+指把任务层身份映射到执行层身份 / hostname / IP 的版本化配置（`uav_identity_map.yaml`），字段含 `uav_id / exec_target / hostname / ip / enabled`。实机使用前需人工复核。
+
+## GCS_A
+
+指 Group A 地面站在 `swarm_topology_bridge` 拓扑中的逻辑节点名。负责接收整组批次任务、按机下发统一任务消息、接收单机状态、汇总整组结果。
+
+## GCS_A 分发后端
+
+指 GCS_A 本地的整组 `ExecuteGroupTask` Action server（`gcs_a_backend_node.py`）。按身份映射拆分单机任务，并发确认并汇总单机状态，执行 `ALL` 失败即停与 HOLD；具体参数见后续开发计划 Phase 2。
+
+## 通用 Service 代理
+
+指 `swarm_topology_bridge` 中基于 ZMQ 的跨机请求/响应代理。配置声明 Service 名称、类型、目标节点；请求携带 bridge 层唯一 request ID，支持并发、超时与迟到响应丢弃。bridge 不理解任务业务，只代理 ROS 序列化请求/响应。

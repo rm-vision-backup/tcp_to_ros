@@ -1,0 +1,41 @@
+# tcp_to_ros 提问记录
+
+本文件只保留问题与结论的历史记录，不重复承载方案细节。Phase 编号与接口/聚合/超时约束以 `docs/tcp_to_ros_后续开发计划.md` 为唯一权威。
+
+## 已确认问题
+
+1. 包结构：第一版单包先行；包名 `tcp_to_ros`（语义 `tcp-to-ros`）。
+2. ROS 接口：主接口 Action + Topic（持续状态） + Service（紧急悬停）。
+3. 适配边界：`tcp_to_ros` 只做数据适配，不实现真实控制；真实控制后续以新增 backend 或功能包接入。
+4. 第一版验收：先跑通 A 组六任务，由 mock 自动回复验证通信与语义对接。
+5. mock 方式：参数化自动回复，覆盖成功、失败、超时场景。
+
+## 当前假设
+
+- Group A 地面站只服务本组 runtime；
+- 默认本机或局域网可达，不在代码写死 IP；
+- Group A 与 Group B 地面站暂不通信；
+- 真实机载控制接口后续再抽取。
+
+## 跨机通信方案研讨结论（摘要）
+
+经研讨确认：只靠单向 Topic 无法满足 TCP `ACCEPTED` 的严格语义（无请求响应、无应用层确认和重发保证）。
+
+最终确定 **GCS 本地 Action + 跨机 Service + 跨机 Topic**：
+
+- 整组生命周期：本地 `ExecuteGroupTask.action`；
+- 任务接收与 HOLD：跨机 Service；
+- 执行反馈与终态：跨机 Topic；
+- 不扩展完整跨机 Action；`swarm_topology_bridge` 增加通用 Service 代理。
+
+方案的详细比较、冻结接口字段、聚合与超时约束见 `docs/tcp_to_ros_后续开发计划.md`，不再在此重复。
+
+## 后续待确认事项
+
+1. GCS_A 最终实际 IP、hostname 和部署位置；
+2. A01-A15 映射表的现场复核结果；
+3. `detail_stage` 和 `error_code` 的完整枚举；
+4. bridge Service 代理的端口分配和并发上限；
+5. GCS_A/UAV 重启后是否持久化活动任务与终态；
+6. 真实机载动作层对稳定悬停、航线完成和受控退出的判据；
+7. PX4/MAVROS 在机载断联时的独立 failsafe 策略。
