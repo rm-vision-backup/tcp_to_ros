@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable, List, Sequence, Tuple
 
-from tcp_to_ros.msg import Pose3DYaw, TaskAssignment
 from tcp_to_ros.msg import ExecuteGroupTaskGoal
+from swarm_uav_interfaces.msg import Pose3DYaw, TaskAssignment
 
 from .protocol import Assignment, ParsedCommand
 

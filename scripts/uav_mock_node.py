@@ -22,9 +22,9 @@ from typing import Dict
 
 import rospy
 
-from tcp_to_ros.msg import UavTaskState
-from tcp_to_ros.srv import UavHold, UavHoldRequest, UavHoldResponse
-from tcp_to_ros.srv import UavTask, UavTaskRequest, UavTaskResponse
+from swarm_uav_interfaces.msg import UavTaskState
+from swarm_uav_interfaces.srv import UavHold, UavHoldRequest, UavHoldResponse
+from swarm_uav_interfaces.srv import UavTask, UavTaskRequest, UavTaskResponse
 
 PROTOCOL_VERSION = "1.0"
 

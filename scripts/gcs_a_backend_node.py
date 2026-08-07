@@ -27,12 +27,13 @@ from tcp_to_ros.msg import (
     ExecuteGroupTaskAction,
     ExecuteGroupTaskFeedback,
     ExecuteGroupTaskResult,
-    TaskAssignment,
-    UavTaskState,
 )
 from tcp_to_ros.srv import (
     EmergencyHold,
     EmergencyHoldResponse,
+)
+from swarm_uav_interfaces.msg import TaskAssignment, UavTaskState
+from swarm_uav_interfaces.srv import (
     UavHold,
     UavHoldRequest,
     UavTask,

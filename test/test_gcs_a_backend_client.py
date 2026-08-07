@@ -18,9 +18,8 @@ import rospy
 from tcp_to_ros.msg import (
     ExecuteGroupTaskAction,
     ExecuteGroupTaskGoal,
-    Pose3DYaw,
-    TaskAssignment,
 )
+from swarm_uav_interfaces.msg import Pose3DYaw, TaskAssignment
 
 
 def build_goal(

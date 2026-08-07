@@ -32,7 +32,7 @@ uavs:
 
 topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
-  - {name: uav_task_state, type: tcp_to_ros/UavTaskState, max_freq: 0}
+  - {name: uav_task_state, type: swarm_uav_interfaces/UavTaskState, max_freq: 0}
 
 max_freq: 0
 base_port: 4200
@@ -51,11 +51,11 @@ topology:
 #   - 本机是 target 时: 绑定 ROUTER, 调用本机同名 ROS Service 返回响应
 #   - 本机不是 target 时: 注册本地同名 ROS Service 代理, 转发到 target
 services:
-  - {name: /UAV1/uav_task, type: tcp_to_ros/UavTask, target: UAV1}
-  - {name: /UAV1/uav_hold, type: tcp_to_ros/UavHold, target: UAV1}
-  - {name: /UAV2/uav_task, type: tcp_to_ros/UavTask, target: UAV2}
-  - {name: /UAV2/uav_hold, type: tcp_to_ros/UavHold, target: UAV2}
-  - {name: /UAV3/uav_task, type: tcp_to_ros/UavTask, target: UAV3}
-  - {name: /UAV3/uav_hold, type: tcp_to_ros/UavHold, target: UAV3}
+  - {name: /UAV1/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV1}
+  - {name: /UAV1/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV1}
+  - {name: /UAV2/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV2}
+  - {name: /UAV2/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV2}
+  - {name: /UAV3/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV3}
+  - {name: /UAV3/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV3}
 
 service_base_port: 14000

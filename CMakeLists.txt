@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   rospy
   std_msgs
+  swarm_uav_interfaces
 )
 
 catkin_python_setup()
@@ -14,16 +15,11 @@ catkin_python_setup()
 add_message_files(
   FILES
   GroupTaskState.msg
-  Pose3DYaw.msg
-  TaskAssignment.msg
-  UavTaskState.msg
 )
 
 add_service_files(
   FILES
   EmergencyHold.srv
-  UavHold.srv
-  UavTask.srv
 )
 
 add_action_files(
@@ -35,6 +31,7 @@ generate_messages(
   DEPENDENCIES
   actionlib_msgs
   std_msgs
+  swarm_uav_interfaces
 )
 
 catkin_package(
@@ -45,6 +42,7 @@ catkin_package(
     rospy
     std_msgs
     swarm_topology_bridge
+    swarm_uav_interfaces
 )
 
 catkin_install_python(PROGRAMS
