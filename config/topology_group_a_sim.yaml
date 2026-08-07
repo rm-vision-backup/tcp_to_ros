@@ -35,7 +35,7 @@ topics:
   - {name: uav_task_state, type: tcp_to_ros/UavTaskState, max_freq: 0}
 
 max_freq: 0
-base_port: 4000
+base_port: 4200
 
 # Topic 桥拓扑: topology[my_name] 表示本机接收这些源的状态 Topic。
 # 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间不需要互收状态。
