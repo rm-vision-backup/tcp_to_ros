@@ -34,6 +34,65 @@
 - 启动方式：
   - `roslaunch tcp_to_ros tcp_to_ros_mock.launch`
 
+## 测试方法
+
+### 正向测试（A 组六批次）
+
+目的：验证 `tcp_to_ros` 是否正确承接 Group A 的 6 个 TCP 任务、mock backend 与 Action/Topic/Service 主链路，并让 `references/runtime/task_test.py` 返回 `SUCCESS`。
+
+前提：先完成构建与启动（`roslaunch` 会自动启动 `rosmaster`，无需手动 `roscore`；默认监听 `127.0.0.1:39001`）：
+
+```bash
+cd /home/ub20tg/catkin_swarm6-2
+source ~/.bashrc
+catkin build tcp_to_ros
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+roslaunch tcp_to_ros tcp_to_ros_mock.launch
+```
+
+另开终端执行：
+
+```bash
+cd /home/ub20tg/catkin_swarm6-2
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+
+python3 references/runtime/task_test.py --backend tcp --group A --task prepare --tcp-host 127.0.0.1 --tcp-port 39001
+python3 references/runtime/task_test.py --backend tcp --group A --task coverage-segment-1 --tcp-host 127.0.0.1 --tcp-port 39001
+python3 references/runtime/task_test.py --backend tcp --group A --task fault-exit --tcp-host 127.0.0.1 --tcp-port 39001
+python3 references/runtime/task_test.py --backend tcp --group A --task recovery --tcp-host 127.0.0.1 --tcp-port 39001
+python3 references/runtime/task_test.py --backend tcp --group A --task coverage-segment-2 --tcp-host 127.0.0.1 --tcp-port 39001
+python3 references/runtime/task_test.py --backend tcp --group A --task hold-end --tcp-host 127.0.0.1 --tcp-port 39001
+```
+
+预期：每条命令退出码为 `0`、输出 JSON 的 `status` 为 `SUCCESS`、`failed_robot_ids` 为空。
+
+### 负向测试
+
+目的：验证协议拒绝路径、`command_id` 去重缓存与 `HOLD` 对活动任务的打断逻辑。
+
+前提：同样先启动 `tcp_to_ros_mock.launch`。
+
+另开终端执行：
+
+```bash
+cd /home/ub20tg/catkin_swarm6-2
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+
+python3 src/tcp_to_ros/test/test_wrong_group.py
+python3 src/tcp_to_ros/test/test_duplicate_command.py
+python3 src/tcp_to_ros/test/test_hold_interrupt.py
+```
+
+预期：
+
+| 脚本 | 预期输出 |
+|---|---|
+| `test_wrong_group.py` | 退出码 `0`；返回 `FAILED`；`error_code=WRONG_GROUP` |
+| `test_duplicate_command.py` | 退出码 `0`；第一次 `ACCEPTED`，第二次 `COMPLETED`，第三次缓存终态 `COMPLETED` |
+| `test_hold_interrupt.py` | 退出码 `0`；`FOLLOW_ROUTE` 先 `ACCEPTED`，`HOLD` 返回 `COMPLETED`，原任务再次查询返回 `FAILED` 且 `error_code=COMMAND_HELD` |
+
 ## 正向测试结果
 
 ### A 组六批次任务
@@ -93,6 +152,34 @@
 - `src/tcp_to_ros/scripts/gcs_a_backend_node.py`
 - `src/tcp_to_ros/scripts/uav_mock_node.py`
 - `src/swarm_topology_bridge/scripts/bridge_node.py`（Topic 限频修正 + Service 代理）
+
+### 测试方法
+
+**单 Master 语义联调**：启动 GCS_A 后端 + UAV1..3 mock：
+
+```bash
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+roslaunch tcp_to_ros gcs_a_backend_test.launch
+```
+
+另开终端跑集成测试客户端：
+
+```bash
+# 正常整组 / 重复幂等（第二次仍 COMPLETED，幂等）
+python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
+  --timeout 15 --expect COMPLETED
+python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
+  --timeout 15 --expect COMPLETED
+# 失败即停：改用注入失败的 launch（UAV2 FAILED）
+roslaunch tcp_to_ros gcs_a_backend_fail.launch
+python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-001 \
+  --timeout 15 --expect FAILED
+```
+
+预期：前两次 `RESULT_FINAL=COMPLETED`（completed=A01,A02,A03）；失败场景 `RESULT_FINAL=FAILED`、failed_uavs=A02、error=`MOCK_UAV2_FAIL`。
+
+**双 Master 跨机 Service 代理**：先清理上述 launch，再按 GCS_A / UAV1 两个 Master 启动桥与 mock，最后在 GCS_A Master 上 `rosservice call /UAV1/uav_task` 验证跨 Master 转发（见下）。
 
 ### 单 Master 语义联调
 
