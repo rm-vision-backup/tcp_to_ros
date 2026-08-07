@@ -159,7 +159,9 @@ python3 src/tcp_to_ros/test/test_hold_interrupt.py
 
 ### 单 Master 语义联调 测试方法
 
-启动 GCS_A 后端 + UAV1..3 mock：
+在**一个** ROS Master 内同时启动 GCS_A 分发后端与 UAV1..3 的机载 mock（`gcs_a_backend_test.launch` 会拉起 `gcs_a_backend_node` + 3 个 `uav_mock_node`）。`roslaunch` 会自动启动 `rosmaster`，无需手动 `roscore`。
+
+**终端 1（启动）**：
 
 ```bash
 source ~/.bashrc
@@ -167,21 +169,36 @@ source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
 roslaunch tcp_to_ros gcs_a_backend_test.launch
 ```
 
-另开终端跑集成测试客户端：
+**终端 2（运行集成测试客户端）**：
 
 ```bash
-# 正常整组 / 重复幂等（第二次仍 COMPLETED，幂等）
+source ~/.bashrc
+source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
+cd /home/ub20tg/catkin_swarm6-2
+
+# ① 正常整组 MOVE_TO → 期望 COMPLETED
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
   --timeout 15 --expect COMPLETED
+
+# ② 相同 command_id 再发一次 → 期望仍 COMPLETED（幂等，不重新执行）
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-ok-001 \
   --timeout 15 --expect COMPLETED
-# 失败即停：改用注入失败的 launch（UAV2 FAILED）
+
+# ③ 失败即停：先 Ctrl-C 停掉终端 1 的 gcs_a_backend_test.launch
+#    再改用注入 UAV2 失败的 launch（UAV2 mock final_status=FAILED，UAV1/UAV3 慢执行）
+#    注意：必须停掉前一个 launch，否则端口/节点冲突
 roslaunch tcp_to_ros gcs_a_backend_fail.launch
+#    另开（或复用）测试终端，期望 FAILED
 python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --command-id ver-fail-001 \
   --timeout 15 --expect FAILED
 ```
 
-预期：前两次 `RESULT_FINAL=COMPLETED`（completed=A01,A02,A03）；失败场景 `RESULT_FINAL=FAILED`、failed_uavs=A02、error=`MOCK_UAV2_FAIL`。
+参数说明：`--command-id` 指定整组命令 ID（相同 ID 触发幂等缓存）；`--timeout 15` 是测试客户端等待上限；`--expect` 是断言的目标终态（`COMPLETED`/`FAILED`）。
+
+**预期输出**：
+
+- ①② 均打印 `RESULT_FINAL=COMPLETED`、`RESULT_COMPLETED=A01,A02,A03`（正常整组 + 重复幂等）；
+- ③ 打印 `RESULT_FINAL=FAILED`、`RESULT_FAILED=A02`、`RESULT_ERROR=MOCK_UAV2_FAIL`，且 GCS_A 对活动 UAV（A01/A03）下发 HOLD 并逐机确认。
 
 ### 单 Master 测试结果
 
