@@ -300,19 +300,29 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 
 ### Phase 4：机载执行适配层
 
-- 实现任务和 HOLD Service server；
-- 实现幂等缓存与状态 Topic；
-- 对接本机动作层。
+状态：**首版代码与自动化测试已完成，SITL/不上桨现场验收待外部环境完成。**
+
+- 已将共享接口一次性迁移至独立纯接口包 `swarm_uav_interfaces`；
+- 已实现独立单机包 `swarm_uav_executor`：任务/HOLD Service、幂等缓存、状态 Topic、身份隔离、单活动任务及 HOLD 抢占；
+- 已提供 `MockMotionDriver` 与 direct `MavrosPositionDriver`；direct driver 默认不 arm、不切 OFFBOARD；
+- 已用单元测试和单 Master rostest 验证 `MOVE_TO + HOLD`；真实坐标系、阈值、namespace 与 PX4 failsafe 尚未冻结，因此未取得上桨许可。
 
 ### Phase 5：仿真联调
 
-- 运行 `GCS_A + bridge + 多 Master mock UAV`；
-- 验证正常、拒绝、超时、重试、重复请求、状态乱序、断线和 HOLD。
+状态：**核心 mock 链路与安全边界已有验证证据，完整可复现的多 Master 弱网验收仍需收口。**
+
+- 已用新 executor 替换旧 `tcp_to_ros/uav_mock_node.py`，单 Master 正常、重复幂等、单机失败即停回归通过；
+- GCS_A 已按参与 UAV/exec_target 聚合状态，并按 `status_seq` 丢弃重复与乱序状态；
+- 共享绝对 deadline 保证整组确认不按 UAV 数量串行放大；迟到 Service 响应不能把已超时尝试复活；
+- Action cancel 与 TCP 连接关闭均进入 HOLD 补偿路径，未确认 HOLD 会保留错误事实；
+- 尚需在独立 ROS Master + bridge 网络故障注入环境中归档完整 Topic、重连、丢包与迟响应端到端日志。
 
 ### Phase 6：实机联调
 
 - 接入真实机载动作层；
 - 验证 `MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER` 闭环。
+
+当前仅实现 `MOVE_TO + HOLD`。`FOLLOW_ROUTE/FAULT_EXIT/HOVER`、EGO Planner、编队及机间避碰均为后续范围。
 
 ## 机载动作层语义参考
 

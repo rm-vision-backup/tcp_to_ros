@@ -68,3 +68,11 @@
 - 只使用 `catkin build`，默认 `build/devel/logs`；基础环境 `source ~/.bashrc`，构建后额外 `source /home/ub20tg/catkin_swarm6-2/devel/setup.bash`；
 - 当前 Agent 环境对 `~/.ros` 写入有限制，联调使用工作区内 `ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home`、`ROS_LOG_DIR=.../.ros_home/log`；
 - 详细验证结果见 `tcp_to_ros_测试记录.md`。
+
+## 阶段十一，对应 Phase 4/5：共享接口与单机执行器首版
+
+- 共享 `Pose3DYaw/TaskAssignment/UavTaskState/UavTask/UavHold` 原字段原序迁移到独立纯接口仓库 `swarm_uav_interfaces`；`tcp_to_ros` 只保留本地 Action、整组状态与 EmergencyHold；
+- 新建独立 `swarm_uav_executor`，每实例绑定 `(uav_id, exec_target)`，实现 TaskStore、状态报告、单活动任务、HOLD 抢占、mock 与 direct MAVROS driver；
+- 新 executor mock 通过等价回归后，删除旧 `scripts/uav_mock_node.py`，避免 GCS 包与机载包并存两套执行语义；
+- GCS_A 补齐参与机/exec_target/status_seq 状态过滤、共享绝对确认 deadline、迟响应隔离、Action cancel 与 TCP 断线 HOLD 补偿；
+- 自动化证据：executor 22/22、tcp_to_ros 7/7，通过三包联合构建；PX4 SITL、真实弱网和不上桨现场记录仍待外部环境。

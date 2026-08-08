@@ -296,3 +296,35 @@ assignment:
 - 测试步骤：`tcp_to_ros_测试步骤.md`
 - 工程过程：`tcp_to_ros_工程过程.md`
 - 后续开发计划：`tcp_to_ros_后续开发计划.md`
+
+---
+
+# Phase 4 首版与 Phase 5 安全边界回归（2026-08-08）
+
+## 实施范围
+
+- 共享 ROS 类型迁移到独立 `swarm_uav_interfaces`，旧共享 msg/srv 定义从 `tcp_to_ros` 删除；
+- 新建独立 `swarm_uav_executor`，实现本机身份隔离、幂等、`MOVE_TO + HOLD`、mock 与 direct MAVROS driver；
+- GCS_A 消费新接口，聚合跨机状态，补齐共享确认 deadline、状态去重、取消与 TCP 断线 HOLD 补偿；
+- 旧 `tcp_to_ros/scripts/uav_mock_node.py` 已删除，integration launch 使用新 executor mock。
+
+## 自动化验证结果
+
+| 验证层 | 命令/范围 | 结果 |
+|---|---|---|
+| 构建 | `catkin build swarm_uav_interfaces swarm_uav_executor tcp_to_ros` | 4 个依赖包全部成功，0 warning/failed |
+| executor | `catkin run_tests swarm_uav_executor` | 22 tests，0 error，0 failure |
+| GCS_A 安全边界 | `catkin run_tests tcp_to_ros` | 7 tests，0 error，0 failure |
+| ROS 单 Master | `uav_executor_rostest.test` | Service 接收与终态 Topic 通过 |
+
+executor 测试覆盖：身份不匹配、同键幂等/冲突、忙时拒绝、HOLD 抢占、timeout、driver failure、HOLD failure、MAVROS disconnect、pose stale、setpoint/frame/yaw、连续稳定窗口、HOLD 捕获当前 pose，以及禁止自动 arm/mode。
+
+GCS_A 安全边界测试覆盖：非参与机/错误 exec_target 状态丢弃、`status_seq` 重复与乱序丢弃、HOLD 仅发给已接受且未终止 UAV、Service 迟响应不复活、所有确认 worker 共用绝对 deadline、EmergencyHold 取消 Action 并报告未确认 UAV、TCP 断线取消 Action 并请求整组 HOLD。
+
+## 验收结论与边界
+
+- 可声明：GCS_A 核心链路达到机载接入基线；Phase 4 `MOVE_TO + HOLD` 首版代码、mock、direct MAVROS fake-callback 测试及单 Master ROS 闭环完成。
+- 不可声明：GCS_A 全部最终验收完成，或 direct MAVROS 已通过真实飞行验证。
+- 当前主机可发现 MAVROS 与 Gazebo，但无 PX4 SITL 可执行程序；因此 PX4 SITL、rosbag、真实 setpoint 流与 failsafe 交互未执行。
+- 完整多 Master 弱网验收仍需归档：状态 Topic 经 bridge 的端到端聚合、网络重连/丢包、Service 代理超时与迟响应日志。
+- 上桨前仍必须现场冻结 A01-A15/hostname/IP、MAVROS namespace、坐标系/yaw、位置与 yaw 阈值、PX4 failsafe、急停职责及场地许可。

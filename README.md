@@ -5,15 +5,15 @@
 ## 组成与文件
 
 - `action/ExecuteGroupTask.action`：GCS 本地整组任务 Action（goal 为整组 `assignments`，feedback/result 表示整组 ACCEPTED/COMPLETED/FAILED）。
-- `msg/`：`Pose3DYaw`（位姿）、`TaskAssignment`（逐机任务项）、`UavTaskState`（单机状态三态）、`GroupTaskState`（整组状态聚合）。
-- `srv/`：`UavTask.srv`（单机任务接收 Service，跨 Master 代理）、`UavHold.srv`（单机 HOLD Service，跨 Master 代理）、`EmergencyHold.srv`（本地整组紧急悬停）。
+- `msg/GroupTaskState.msg`：GCS 本地整组状态聚合；共享位姿、assignment 与单机状态由 `swarm_uav_interfaces` 定义。
+- `srv/EmergencyHold.srv`：GCS 本地整组紧急悬停；跨机 `UavTask`/`UavHold` 由 `swarm_uav_interfaces` 定义。
 - `scripts/`：
   - `tcp_server_node.py`：TCP Server，仅做协议适配，把整组命令交给 Action；不承载逐机路由与聚合。
   - `gcs_a_backend_node.py`：GCS_A 分发后端（`ExecuteGroupTask` Action server）：按身份映射拆分单机任务、并发 Service 确认（单次 1.0s、首次+2 重试、0.2s 间隔、4s 预算）、订阅并聚合单机状态、至少一次请求+幂等、超时/cancel/HOLD、`ALL` 失败即停。
-  - `uav_mock_node.py`：单机 mock 执行适配层（提供 `UavTask`/`UavHold` Service、发布 `UavTaskState` Topic、幂等缓存与终态重发）。
+  - 单机 mock 与 direct MAVROS 执行适配由独立包 `swarm_uav_executor` 提供，避免地面站包拥有机载控制语义。
   - `mock_backend_node.py` / `task_event_injector.py`：早期整组 mock 与手动 HOLD 注入（旧闭环，仍在但分发层已改用 `gcs_a_backend_node.py`）。
   - `tcp_to_ros/`：`bridge.py`（TCP→Action 转换）、`protocol.py`（JSON 校验）、`dedup.py`、`state.py`、`identity.py`（身份映射加载）。
-- `config/`：`uav_identity_map.yaml`（A01..A15→UAV1..UAV15/hostname/IP，待复核）、`topology_group_a_sim.yaml`（Group A 多 Master 桥接/服务代理配置）、`mock_backend.yaml`、`uav_mock_config.yaml`。
+- `config/`：`uav_identity_map.yaml`（A01..A15→UAV1..UAV15/hostname/IP，待复核）、`topology_group_a_sim.yaml`（Group A 多 Master 桥接/服务代理配置）、`mock_backend.yaml`；executor mock 策略由 `swarm_uav_executor` launch 参数配置。
 - `launch/`：`gcs_a_backend.launch`（仅 GCS_A 后端）、`gcs_a_backend_test.launch`（GCS_A 后端 + UAV1..3 mock，单 Master 语义联调）、`gcs_a_backend_fail.launch`（含失败注入）、`tcp_to_ros_mock.launch`（旧 mock 闭环）、`topology_group_a_sim.launch`（Group A 多 Master 仿真拓扑）。
 - `test/test_gcs_a_backend_client.py`：集成/回归测试客户端。
 
@@ -83,7 +83,7 @@ python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
 
 ## mock 配置
 
-`config/mock_backend.yaml`（旧闭环）与 `config/uav_mock_config.yaml`（单机 mock）支持按命令/策略覆写 `accept_delay_s`、`result_delay_s`、`send_accepted_feedback`、`final_status`、`failed_uavs`、`error_code`、`message` 等，用于覆盖成功、失败、超时、慢确认等场景。
+`config/mock_backend.yaml` 保留早期整组 mock；当前单机 mock 由 `swarm_uav_executor` 提供，可通过 launch 参数配置接受/执行延时、终态、错误码与 HOLD 行为，用于成功、失败、超时和安全路径测试。
 
 ## 关联文档
 

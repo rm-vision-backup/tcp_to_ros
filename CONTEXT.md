@@ -6,7 +6,7 @@
 > - 验证结果：`docs/tcp_to_ros_测试记录.md`
 > - 问题与结论历史：`docs/tcp_to_ros_提问记录.md`
 > - 会话交接参数：`handoff/*`
-> - 包关系：`tcp_to_ros` 为 GCS_A 地面站主包（本仓跟踪）；`swarm_topology_bridge` 为通用通信包（本仓 submodule，services 分支）；`safe_valley_exp` 为机载应用示例，已从本仓 submodule 中剔除、作为独立功能包维护，其桥接依赖走 `swarm_topology_bridge` 的 master 分支。
+> - 包关系：`tcp_to_ros` 为 GCS_A 地面站业务包；`swarm_uav_interfaces` 为 GCS 与机载共同依赖的纯 ROS 接口包；`swarm_uav_executor` 为每架 UAV 本机部署的执行适配包；三者是相互独立的 Git 仓库。`swarm_topology_bridge` 是不解释 command 的通用通信包。工作空间根目录不拥有这些仓库，也不将两个新包登记为 submodule。
 
 ## Group A
 
@@ -89,3 +89,15 @@
 ## 通用 Service 代理
 
 指 `swarm_topology_bridge` 中基于 ZMQ 的跨机请求/响应代理。配置声明 Service 名称、类型、目标节点；请求携带 bridge 层唯一 request ID，支持并发、超时与迟到响应丢弃。bridge 不理解任务业务，只代理 ROS 序列化请求/响应。
+
+## 共享机载接口包
+
+指 `swarm_uav_interfaces`。它只拥有 GCS 与机载共同使用的 `Pose3DYaw`、`TaskAssignment`、`UavTaskState`、`UavTask` 和 `UavHold` 定义，不包含 GCS 聚合、机载动作或 bridge 业务逻辑。
+
+## 单机执行器
+
+指 `swarm_uav_executor`。每个实例在启动时绑定唯一且不可变的任务身份与执行身份，只能连接和控制本机动作 driver。其他 UAV 信息未来只能作为感知或避碰输入，不能形成跨机控制权。
+
+## 动作 driver
+
+指单机执行器与具体运动实现之间的可替换端口。首版实现确定性 mock 与 direct MAVROS position-setpoint；未来 EGO Planner、航线和编队能力通过新 driver 或上层协调器接入，不改变冻结的跨机接口。
