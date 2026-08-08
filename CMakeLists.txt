@@ -5,6 +5,7 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   actionlib_msgs
   message_generation
+  mavros_msgs
   rospy
   std_msgs
   swarm_uav_interfaces
@@ -39,6 +40,7 @@ catkin_package(
     actionlib
     actionlib_msgs
     message_runtime
+    mavros_msgs
     rospy
     std_msgs
     swarm_topology_bridge

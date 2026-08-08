@@ -156,6 +156,32 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertEqual("hold unconfirmed for: A01", response.message)
         self.assertEqual([True], cancelled)
 
+    def test_link_loss_affects_only_participating_uav(self):
+        self.node._active = self.state
+        self.node._active_lock = threading.RLock()
+        self.node._inject_link_lost("A03")
+        self.assertEqual([], self.state.failed_uavs)
+        self.assertFalse(self.state.stop_event.is_set())
+        self.node._inject_link_lost("A01")
+        self.assertEqual(["A01"], self.state.link_lost_uavs)
+        self.assertEqual(["A01"], self.state.failed_uavs)
+        self.assertEqual("UAV_LINK_LOST", self.state.error_code)
+        self.assertTrue(self.state.stop_event.is_set())
+
+    def test_link_lost_uav_is_skipped_by_group_hold(self):
+        self.state.accepted_uavs = ["A01", "A02"]
+        self.state.link_lost_uavs = ["A01"]
+        captured = []
+
+        def fake_call(_proxy, request, _timeout):
+            captured.append(request.uav_id)
+            return MODULE._CallOutcome(response=type("Response", (), {"accepted": True})())
+
+        self.node.confirm_wait_s = 0.01
+        self.node._call_service_with_timeout = fake_call
+        self.node._safe_hold(self.state, "link lost", skip=self.state.link_lost_uavs)
+        self.assertEqual(["A02"], captured)
+
 
 if __name__ == "__main__":
     unittest.main()

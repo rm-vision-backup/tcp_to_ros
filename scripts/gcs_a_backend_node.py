@@ -17,11 +17,13 @@ Frozen decisions implemented here:
 from __future__ import annotations
 
 import threading
+import time
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 import actionlib
 import rospy
+from mavros_msgs.msg import State as MavrosState
 
 from tcp_to_ros.msg import (
     ExecuteGroupTaskAction,
@@ -32,15 +34,18 @@ from tcp_to_ros.srv import (
     EmergencyHold,
     EmergencyHoldResponse,
 )
-from swarm_uav_interfaces.msg import TaskAssignment, UavTaskState
+from swarm_uav_interfaces.msg import TaskAssignment, UavLinkHealth, UavTaskState
 from swarm_uav_interfaces.srv import (
     UavHold,
     UavHoldRequest,
+    UavSafetyLease,
     UavTask,
     UavTaskRequest,
 )
 
 from tcp_to_ros.identity import IdentityMap
+from tcp_to_ros.link_health import LOST, UavLinkMonitor
+from tcp_to_ros.safety_lease import SafetyLeaseCoordinator
 
 PROTOCOL_VERSION = "1.0"
 
@@ -51,6 +56,8 @@ PROTOCOL_VERSION = "1.0"
 TASK_SERVICE_SUFFIX = "uav_task"
 HOLD_SERVICE_SUFFIX = "uav_hold"
 STATE_TOPIC_SUFFIX = "uav_task_state"
+MAVROS_STATE_SUFFIX = "mavros/state"
+LEASE_SERVICE_SUFFIX = "uav_safety_lease"
 
 # Confirm plan constants
 DEFAULT_CONFIRM_WAIT_S = 1.0
@@ -103,6 +110,7 @@ class GroupState:
     seen_seq: Dict[str, int] = field(default_factory=dict)  # uav_id -> max status_seq
     pre_accept: List[UavTaskState] = field(default_factory=list)  # terminal states arriving before group ACCEPTED
     failed_uavs: List[str] = field(default_factory=list)
+    link_lost_uavs: List[str] = field(default_factory=list)
     hold_pending: List[str] = field(default_factory=list)
     held: List[str] = field(default_factory=list)
     hold_rejected: List[str] = field(default_factory=list)
@@ -143,6 +151,21 @@ class GcsABackendNode:
         )
 
         self.identity_map = IdentityMap.load(self.identity_map_path)
+        enabled = [(item.uav_id, item.exec_target) for item in self.identity_map.uavs if item.enabled]
+        self.link_monitor = UavLinkMonitor(
+            enabled,
+            float(rospy.get_param("~link_suspect_after_s", 3.0)),
+            float(rospy.get_param("~link_lost_after_s", 5.0)),
+            float(rospy.get_param("~link_healthy_window_s", 3.0)),
+        )
+        self.link_health_publisher = rospy.Publisher(
+            rospy.get_param("~link_health_topic", "/group_a/uav_link_health"),
+            UavLinkHealth, queue_size=100, latch=True)
+        self.lease_coordinator = SafetyLeaseCoordinator(
+            self._call_safety_lease,
+            float(rospy.get_param("~safety_lease_ttl_s", 5.0)),
+            float(rospy.get_param("~safety_lease_call_timeout_s", 1.0)),
+        )
 
         self.server = actionlib.SimpleActionServer(
             self.action_name,
@@ -158,6 +181,10 @@ class GcsABackendNode:
         self._active_lock = threading.RLock()
 
         self._subscribe_uav_states()
+        self._safety_stop = threading.Event()
+        self._safety_thread = threading.Thread(target=self._safety_loop, daemon=True)
+        self._safety_thread.start()
+        rospy.on_shutdown(self.shutdown)
         self.server.start()
         rospy.loginfo(
             "GCS_A backend ready: action=%s service=%s uavs=%d",
@@ -182,6 +209,68 @@ class GcsABackendNode:
                 topic, UavTaskState, self._on_uav_state, queue_size=50
             )
             rospy.loginfo("GCS_A subscribed to %s", topic)
+            mavros_topic = "/{}/{}".format(ident.exec_target, MAVROS_STATE_SUFFIX)
+            rospy.Subscriber(mavros_topic, MavrosState, self._on_mavros_state,
+                             callback_args=(ident.uav_id, ident.exec_target), queue_size=10)
+            rospy.loginfo("GCS_A subscribed to %s", mavros_topic)
+
+    def _on_mavros_state(self, msg, identity) -> None:
+        self.link_monitor.record_state(identity[0], identity[1], bool(msg.connected))
+
+    def _safety_loop(self) -> None:
+        next_renew = time.monotonic()
+        while not self._safety_stop.wait(0.1):
+            self._evaluate_link_health()
+            now = time.monotonic()
+            if now >= next_renew:
+                failures = self.lease_coordinator.renew(now + 0.9)
+                self._inject_lease_failures(failures)
+                next_renew = now + 1.0
+
+    def _evaluate_link_health(self) -> None:
+        transitions = self.link_monitor.evaluate()
+        session = self.lease_coordinator.session
+        mission_id = session.mission_id if session else ""
+        epoch = session.epoch if session else ""
+        for transition in transitions:
+            snapshot = self.link_monitor.snapshot(
+                transition.uav_id, rospy.Time.now().to_sec(), mission_id, epoch)
+            self.link_health_publisher.publish(snapshot)
+            rospy.logwarn("UAV link %s/%s %s -> %s age=%.3f reason=%s",
+                          transition.uav_id, transition.exec_target,
+                          transition.previous, transition.current,
+                          transition.age_s, transition.reason)
+            if transition.current == LOST:
+                self._inject_link_lost(transition.uav_id)
+
+    def _inject_link_lost(self, uav_id: str) -> None:
+        with self._active_lock:
+            state = self._active
+        if state is None or uav_id not in state.exec_by_uav:
+            return
+        with state.lock:
+            if uav_id not in state.link_lost_uavs: state.link_lost_uavs.append(uav_id)
+            if uav_id not in state.failed_uavs: state.failed_uavs.append(uav_id)
+            state.error_code = "UAV_LINK_LOST"
+            state.message = "UAV link lost: %s" % uav_id
+            state.stop_event.set()
+
+    def _inject_lease_failures(self, failures) -> None:
+        for failure in failures:
+            with self._active_lock:
+                state = self._active
+            if state is None or failure.uav_id not in state.exec_by_uav: continue
+            with state.lock:
+                if failure.uav_id not in state.failed_uavs: state.failed_uavs.append(failure.uav_id)
+                state.error_code = "UAV_LINK_LOST"
+                state.message = "safety lease renew failed for %s: %s" % (failure.uav_id, failure.message)
+                state.stop_event.set()
+
+    def _call_safety_lease(self, exec_target, request, timeout_s):
+        proxy = rospy.ServiceProxy("/{}/{}".format(exec_target, LEASE_SERVICE_SUFFIX), UavSafetyLease)
+        outcome = self._call_service_with_timeout(proxy, request, timeout_s)
+        if outcome.exception is not None: raise outcome.exception
+        return outcome.response
 
     def _on_uav_state(self, msg: UavTaskState) -> None:
         with self._active_lock:
@@ -258,6 +347,25 @@ class GcsABackendNode:
                 start_time=rospy.Time.now().to_sec(),
             )
             self._active = state
+
+        unhealthy = [uav_id for uav_id in state.uav_ids
+                     if not self.link_monitor.is_stably_healthy(uav_id)]
+        if unhealthy:
+            with self._active_lock: self._active = None
+            result = self._build_result("FAILED", failed_uavs=unhealthy,
+                error_code="UAV_LINK_UNHEALTHY",
+                message="participating UAV link is not stably healthy: %s" % ",".join(unhealthy))
+            self.server.set_aborted(result, text=result.message)
+            return
+        lease_failures = self.lease_coordinator.begin_session(
+            goal.mission_id, state.exec_by_uav.items(), time.monotonic() + self.confirm_deadline_s)
+        if lease_failures:
+            with self._active_lock: self._active = None
+            failed = [item.uav_id for item in lease_failures if item.uav_id] or list(state.uav_ids)
+            result = self._build_result("FAILED", failed_uavs=failed,
+                error_code="LEASE_START_FAILED", message=lease_failures[0].message)
+            self.server.set_aborted(result, text=result.message)
+            return
 
         rospy.loginfo(
             "GCS_A goal %s/%s command=%s uavs=%s",
@@ -384,7 +492,7 @@ class GcsABackendNode:
             self._safe_hold(
                 state,
                 reason="task failed on participating UAV",
-                skip=state.failed_uavs,
+                skip=state.link_lost_uavs or state.failed_uavs,
             )
             result = self._build_result(
                 final_status="FAILED",
@@ -435,7 +543,8 @@ class GcsABackendNode:
         confirm_wait_s, retry interval confirm_retry_interval_s, all inside the
         confirm_deadline_s budget. A clear rejection fails the whole group fast.
         """
-        deadline = rospy.Time.now().to_sec() + self.confirm_deadline_s
+        # START and task confirmation share one absolute acceptance budget.
+        deadline = state.start_time + self.confirm_deadline_s
         results: Dict[str, SingleUavConfirm] = {}
         results_lock = threading.Lock()
         group_failed = threading.Event()
@@ -695,6 +804,14 @@ class GcsABackendNode:
             accepted=held_ok,
             message=detail,
         )
+
+    def shutdown(self) -> None:
+        if hasattr(self, "_safety_stop"):
+            self._safety_stop.set()
+        if hasattr(self, "_safety_thread") and self._safety_thread is not threading.current_thread():
+            self._safety_thread.join(1.5)
+        if getattr(self, "lease_coordinator", None) and self.lease_coordinator.session:
+            rospy.logerr("GCS_A shutting down with an active safety lease; UAV watchdogs will expire locally")
 
     # ------------------------------------------------------------------ utils
 
