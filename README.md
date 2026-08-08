@@ -17,6 +17,37 @@
 - `launch/`：`gcs_a_backend.launch`（仅 GCS_A 后端）、`gcs_a_backend_test.launch`（GCS_A 后端 + UAV1..3 mock，单 Master 语义联调）、`gcs_a_backend_fail.launch`（含失败注入）、`tcp_to_ros_mock.launch`（旧 mock 闭环）、`topology_group_a_sim.launch`（Group A 多 Master 仿真拓扑）。
 - `test/test_gcs_a_backend_client.py`：集成/回归测试客户端。
 
+## 部署位置与最小功能包集合
+
+`src/` 下与 Group A 正式链路相关的功能包按运行位置部署如下。GCS_A 与每台 UAVn 使用独立 ROS Master 时，每台主机都应在本机工作空间完成构建并 source 对应的 `devel/setup.bash`；不能只在 GCS_A 构建后通过网络共享 ROS 类型。
+
+| 功能包 | GCS_A 地面站 | 每台 UAVn 机载电脑 | 部署职责 |
+|---|---:|---:|---|
+| `tcp_to_ros` | 必需 | 不需要 | 运行 TCP Server、GCS_A 整组 Action 后端、身份映射、逐机链路健康监测、飞行安全租约协调和整组结果聚合。 |
+| `swarm_uav_executor` | 不需要 | 必需 | 每机运行一个绑定本机 `(uav_id, exec_target)` 的任务执行器，提供任务/HOLD/安全租约 Service、状态 Topic 和本地租约 watchdog；通过本机 MAVROS driver 控制本机。 |
+| `swarm_topology_bridge` | 必需 | 必需 | 在 GCS_A 和每台 UAVn 的 ROS Master 上各运行一个 bridge 实例，按同一 Group A 拓扑转发 Topic，并代理跨 Master Service。 |
+| `swarm_uav_interfaces` | 必需 | 必需 | 提供两端共同使用的 ROS msg/srv 契约；所有 GCS_A、bridge 和 UAVn 主机必须安装、构建并 source 完全相同的接口版本。 |
+
+正式部署的最小包集合为：
+
+```text
+GCS_A:
+  tcp_to_ros
+  swarm_topology_bridge
+  swarm_uav_interfaces
+
+每台 UAVn:
+  swarm_uav_executor
+  swarm_topology_bridge
+  swarm_uav_interfaces
+```
+
+补充说明：
+
+- MAVROS/PX4 及其系统依赖不属于上述四个自研包，但 direct MAVROS executor 运行时必须在对应 UAVn 机载电脑提供本机 MAVROS/PX4 链路；GCS_A 只订阅经 bridge 转发后的 `/{exec_target}/mavros/state`，不直接控制远端 MAVROS。
+- `tcp_to_ros/launch/topology_group_a_sim.launch` 是为了在同一开发机上编排多个 ROS Master、bridge 和 mock executor 的联调入口，因此模拟 UAV 角色时会从 `tcp_to_ros` 启动测试节点。该仿真便利入口不代表实机 UAVn 需要安装或运行 `tcp_to_ros`；实机应分别从 `swarm_topology_bridge` 和 `swarm_uav_executor` 启动机载组件，并加载部署用 Group A 拓扑配置。
+- `safe_valley_exp` 不属于 Group A 正式链路的必需部署集合。它只是应用示例，用于提供无人机机载 offboard 程序以及仿真/实机兼容参考；不得把它视为 `tcp_to_ros`、安全租约闭环或 `swarm_uav_executor` 的运行依赖。若某架 UAV 选择复用其中的示例算法，应作为独立机载应用按其自身文档部署，并继续遵守单机控制权和现场安全门禁。
+
 ## 构建
 
 只使用 `catkin build`，默认 `build/devel/logs`：
