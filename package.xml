@@ -26,5 +26,7 @@
   <exec_depend>swarm_topology_bridge</exec_depend>
   <exec_depend>swarm_uav_interfaces</exec_depend>
 
+  <test_depend>python3-nose</test_depend>
+
   <export />
 </package>

@@ -1,14 +1,14 @@
 <launch>
   <!-- Group A 多 Master 仿真拓扑 launch (属于 tcp_to_ros 地面站主功能包示例)
        每个 ROS Master 启动一次, 通过 uav_name 区分角色:
-       - UAV1/UAV2/UAV3 Master: 运行通用 bridge (UAV 角色) + 机载 mock UAV 节点
+       - UAV1/UAV2/UAV3 Master: 运行通用 bridge (UAV 角色) + 单机 mock executor
        - GCS_A Master: 运行通用 bridge (GCS_A 角色), 由用户另行启动 gcs_a_backend_node/tcp_server_node
        bridge 为通用包 swarm_topology_bridge 的 bridge_node, 按本包 config 动态解析类型。
        ROS_MASTER_URI 与 ZMQ port_offset 共同区分同一台机器上的多个 Master。
 
        命名约定:
-       - 机载 mock 提供 /UAV{n}/uav_task 与 /UAV{n}/uav_hold Service
-       - 机载 mock 发布全局 /uav_task_state Topic (bridge 订阅该名)
+       - 单机 executor 提供 /UAV{n}/uav_task 与 /UAV{n}/uav_hold Service
+       - 单机 executor 发布全局 /uav_task_state Topic (bridge 订阅该名)
        - GCS_A 侧 bridge 转发为 /UAV{n}/uav_task_state, 供 GCS_A backend 订阅 -->
 
   <arg name="uav_name" default="UAV1" />
@@ -22,22 +22,15 @@
     <param name="uav_name" value="$(arg uav_name)" />
   </node>
 
-  <!-- 2. 机载 mock UAV (仅 UAV* 角色, 默认启动; GCS_A 角色关闭) -->
+  <!-- 2. 单机 mock executor (仅 UAV* 角色, 默认启动; GCS_A 角色关闭) -->
   <group if="$(eval arg('run_uav_mock') and arg('uav_name') != 'GCS_A')">
-    <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav_mock_node" output="screen">
-      <param name="exec_target" value="$(arg uav_name)" />
-      <param name="uav_id" value="$(arg uav_id)" />
-      <!-- mock 发布全局状态 Topic, 由 bridge 订阅后转发给 GCS_A -->
-      <param name="state_topic" value="/uav_task_state" />
-      <rosparam param="defaults">
-        accept_delay_s: 0.1
-        result_delay_s: 0.5
-        accept: true
-        final_status: COMPLETED
-        error_code: ""
-        message: mock $(arg uav_name) task finished
-        publish_interval_s: 0.5
-      </rosparam>
-    </node>
+    <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+      <arg name="exec_target" value="$(arg uav_name)" />
+      <arg name="uav_id" value="$(arg uav_id)" />
+      <!-- executor 发布全局状态 Topic, 由 bridge 订阅后转发给 GCS_A -->
+      <arg name="state_topic" value="/uav_task_state" />
+      <arg name="result_delay_s" value="0.5" />
+      <arg name="message" value="mock $(arg uav_name) task finished" />
+    </include>
   </group>
 </launch>

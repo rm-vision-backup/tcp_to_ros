@@ -15,45 +15,24 @@
     <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
   </node>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav1_mock" output="screen">
-    <param name="exec_target" value="UAV1" />
-    <param name="uav_id" value="A01" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 0.5
-      accept: true
-      final_status: COMPLETED
-      error_code: ""
-      message: mock uav1 task finished
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV1" />
+    <arg name="uav_id" value="A01" />
+    <arg name="result_delay_s" value="0.5" />
+    <arg name="message" value="mock uav1 task finished" />
+  </include>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav2_mock" output="screen">
-    <param name="exec_target" value="UAV2" />
-    <param name="uav_id" value="A02" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 0.5
-      accept: true
-      final_status: COMPLETED
-      error_code: ""
-      message: mock uav2 task finished
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV2" />
+    <arg name="uav_id" value="A02" />
+    <arg name="result_delay_s" value="0.5" />
+    <arg name="message" value="mock uav2 task finished" />
+  </include>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav3_mock" output="screen">
-    <param name="exec_target" value="UAV3" />
-    <param name="uav_id" value="A03" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 0.5
-      accept: true
-      final_status: COMPLETED
-      error_code: ""
-      message: mock uav3 task finished
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV3" />
+    <arg name="uav_id" value="A03" />
+    <arg name="result_delay_s" value="0.5" />
+    <arg name="message" value="mock uav3 task finished" />
+  </include>
 </launch>

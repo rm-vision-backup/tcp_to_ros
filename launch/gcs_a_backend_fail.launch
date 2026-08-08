@@ -15,45 +15,26 @@
     <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
   </node>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav1_mock" output="screen">
-    <param name="exec_target" value="UAV1" />
-    <param name="uav_id" value="A01" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 25.0
-      accept: true
-      final_status: COMPLETED
-      error_code: ""
-      message: mock uav1 task finished
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV1" />
+    <arg name="uav_id" value="A01" />
+    <arg name="result_delay_s" value="25.0" />
+    <arg name="message" value="mock uav1 task finished" />
+  </include>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav2_mock" output="screen">
-    <param name="exec_target" value="UAV2" />
-    <param name="uav_id" value="A02" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 0.5
-      accept: true
-      final_status: FAILED
-      error_code: MOCK_UAV2_FAIL
-      message: uav2 mock failed
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV2" />
+    <arg name="uav_id" value="A02" />
+    <arg name="result_delay_s" value="0.5" />
+    <arg name="final_success" value="false" />
+    <arg name="error_code" value="MOCK_UAV2_FAIL" />
+    <arg name="message" value="uav2 mock failed" />
+  </include>
 
-  <node pkg="tcp_to_ros" type="uav_mock_node.py" name="uav3_mock" output="screen">
-    <param name="exec_target" value="UAV3" />
-    <param name="uav_id" value="A03" />
-    <rosparam param="defaults">
-      accept_delay_s: 0.1
-      result_delay_s: 25.0
-      accept: true
-      final_status: COMPLETED
-      error_code: ""
-      message: mock uav3 task finished
-      publish_interval_s: 0.5
-    </rosparam>
-  </node>
+  <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
+    <arg name="exec_target" value="UAV3" />
+    <arg name="uav_id" value="A03" />
+    <arg name="result_delay_s" value="25.0" />
+    <arg name="message" value="mock uav3 task finished" />
+  </include>
 </launch>

@@ -50,9 +50,13 @@ catkin_install_python(PROGRAMS
   scripts/mock_backend_node.py
   scripts/task_event_injector.py
   scripts/gcs_a_backend_node.py
-  scripts/uav_mock_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
+
+if(CATKIN_ENABLE_TESTING)
+  catkin_add_nosetests(test/test_gcs_a_aggregation.py)
+  catkin_add_nosetests(test/test_tcp_disconnect_safety.py)
+endif()
 
 install(DIRECTORY launch/
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/launch

@@ -95,6 +95,9 @@ class GroupState:
 
     accepted: bool = False
     accepted_sent: bool = False
+    # UAVs that returned accepted=true and therefore own an action which may
+    # require compensation even before group ACCEPTED is formed.
+    accepted_uavs: List[str] = field(default_factory=list)
     terminal: Dict[str, str] = field(default_factory=dict)  # uav_id -> COMPLETED/FAILED
     latest_states: Dict[str, UavTaskState] = field(default_factory=dict)
     seen_seq: Dict[str, int] = field(default_factory=dict)  # uav_id -> max status_seq
@@ -187,6 +190,17 @@ class GcsABackendNode:
             return
         if msg.command_id != state.command_id or msg.mission_id != state.mission_id:
             return
+        if (
+            msg.uav_id not in state.exec_by_uav
+            or msg.exec_target != state.exec_by_uav[msg.uav_id]
+        ):
+            rospy.logwarn_throttle(
+                5.0,
+                "ignored task state from non-participant or wrong identity: %s/%s",
+                msg.uav_id,
+                msg.exec_target,
+            )
+            return
         with state.lock:
             if state.stop_event.is_set():
                 return
@@ -269,10 +283,6 @@ class GcsABackendNode:
         if rejections or unresolved:
             # Fail fast: group ACCEPTED must never be sent until every UAV confirmed.
             failed_uavs = [item.uav_id for item in rejections + unresolved]
-            for item in confirm_results:
-                if item.accepted is True:
-                    with state.lock:
-                        state.hold_pending.append(item.uav_id)
             if not state.message:
                 if rejections:
                     first = rejections[0]
@@ -442,8 +452,13 @@ class GcsABackendNode:
             thread.start()
             threads.append(thread)
 
+        # All workers share one absolute deadline. Never spend one deadline per
+        # thread, otherwise a large group can violate the 4 s group decision.
         for thread in threads:
-            thread.join(timeout=max(0.05, self.confirm_deadline_s + 0.5))
+            remaining = deadline - rospy.Time.now().to_sec()
+            if remaining <= 0:
+                break
+            thread.join(timeout=remaining)
 
         return [results[uav_id] for uav_id in state.uav_ids]
 
@@ -477,6 +492,9 @@ class GcsABackendNode:
                 with results_lock:
                     if response.accepted:
                         confirm.accepted = True
+                        with state.lock:
+                            if confirm.uav_id not in state.accepted_uavs:
+                                state.accepted_uavs.append(confirm.uav_id)
                         return
                     # Clear rejection -> fail the group fast.
                     confirm.accepted = False
@@ -493,7 +511,10 @@ class GcsABackendNode:
                     exc,
                 )
             if attempt < attempts - 1:
-                rospy.sleep(self.confirm_retry_interval_s)
+                remaining = deadline - rospy.Time.now().to_sec()
+                if remaining <= 0:
+                    break
+                rospy.sleep(min(self.confirm_retry_interval_s, remaining))
         with results_lock:
             if confirm.accepted is None:
                 confirm.message = "no accepted response within confirm budget"
@@ -527,8 +548,13 @@ class GcsABackendNode:
 
     def _absorb_state_locked(self, state: GroupState, msg: UavTaskState) -> None:
         """Apply one UAV state message under ``state.lock`` (idempotent/out-of-order)."""
+        if (
+            msg.uav_id not in state.exec_by_uav
+            or msg.exec_target != state.exec_by_uav[msg.uav_id]
+        ):
+            return
         last_seq = state.seen_seq.get(msg.uav_id, -1)
-        if msg.status_seq < last_seq:
+        if msg.status_seq <= last_seq:
             return
         state.seen_seq[msg.uav_id] = msg.status_seq
         state.latest_states[msg.uav_id] = msg
@@ -576,6 +602,7 @@ class GcsABackendNode:
             candidates = [
                 uav_id
                 for uav_id in state.uav_ids
+                if uav_id in state.accepted_uavs
                 if state.terminal.get(uav_id) is None
                 and uav_id not in state.hold_pending
                 and (skip is None or uav_id not in skip)
@@ -660,7 +687,7 @@ class GcsABackendNode:
                 detail = "hold confirmed for all active UAVs"
             else:
                 detail = (
-                    "hold unconfirmed for: {','.join(state.hold_rejected)}"
+                    f"hold unconfirmed for: {','.join(state.hold_rejected)}"
                     if state.hold_rejected
                     else "no active UAVs to hold"
                 )
