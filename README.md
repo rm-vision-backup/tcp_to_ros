@@ -90,4 +90,5 @@ python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
 - 方案与 Phase 编号：`docs/tcp_to_ros_后续开发计划.md`
 - 工程过程与回归记录：`docs/tcp_to_ros_工程过程.md`
 - 验证结果：`docs/tcp_to_ros_测试记录.md`
-- 会话交接：`handoff/handoff_swarm6-2_26080719.md`
+- 冻结实施计划：`plans/`
+- 会话交接：`handoffs/`

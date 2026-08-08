@@ -11,7 +11,7 @@
 - Phase 5：仿真联调
 - Phase 6：实机联调
 
-其他文档（如 `tcp_to_ros_工程过程.md`、`handoff/*`）只使用"阶段"或直接引用本文件 Phase 编号，不自行建立并行的 Phase 编号体系。
+其他文档（如 `tcp_to_ros_工程过程.md`、`handoffs/*`）只使用"阶段"或直接引用本文件 Phase 编号，不自行建立并行的 Phase 编号体系。
 
 ## 目标
 
@@ -79,7 +79,8 @@ Group A 默认包含 6 个整组批次：
 - 并发调用各 UAV 的跨机任务 Service；
 - 订阅单机状态 Topic；
 - 按 `ALL` 策略形成 Action feedback/result；
-- 任一参与机拒绝或确认超时时执行失败即停。
+- 任一参与机拒绝、确认超时或链路 LOST 时执行失败即停；
+- 监测逐机链路健康并维护飞行安全租约；故障机由本地租约 HOLD，其他可达参与机由 GCS_A 请求 HOLD。
 
 ### `swarm_topology_bridge`
 
@@ -99,6 +100,7 @@ Group A 默认包含 6 个整组批次：
 - 校验任务、执行身份和幂等键；
 - 将 `command` 交给本机动作层；
 - 通过 Topic 回传执行状态和终态；
+- 本地监督飞行安全租约，租约过期时不依赖跨机链路触发并锁存安全 HOLD；
 - 不负责跨机通信或整组汇总。
 
 ## 跨机通信方案评估
@@ -310,18 +312,21 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 
 ### Phase 5：仿真联调
 
-状态：**核心 mock 链路、安全边界及三机 PX4 SITL 主动飞行已有验证证据；完整可复现的多 Master 弱网验收仍需收口。**
+状态：**mock 跨 Master 通信安全闭环与既有三机 PX4 SITL 主动飞行均已有验证证据；MAVROS/PX4 租约断链验证仍待执行。**
 
 - 已用新 executor 替换旧 `tcp_to_ros/uav_mock_node.py`，单 Master 正常、重复幂等、单机失败即停回归通过；
 - GCS_A 已按参与 UAV/exec_target 聚合状态，并按 `status_seq` 丢弃重复与乱序状态；
 - 共享绝对 deadline 保证整组确认不按 UAV 数量串行放大；迟到 Service 响应不能把已超时尝试复活；
 - Action cancel 与 TCP 连接关闭均进入 HOLD 补偿路径，未确认 HOLD 会保留错误事实；
 - 三套独立 UAV ROS Master + bridge + direct MAVROS executor 已完成三机 `MOVE_TO` 与 HOLD 的 PX4 SITL 主动飞行；
-- 尚需在可复现的 bridge 网络故障注入环境中归档完整状态 Topic 聚合、4 秒边界、重连、丢包、Service 超时与迟响应端到端日志。
+- 已在隔离的双/三 Master mock 环境验证 MAVROS state Topic 与安全租约 Service 代理、`HEALTHY → SUSPECT → LOST`、参与机 LOST 整组失败、本地/远程 HOLD 分工及安全恢复；
+- 安全 END 后只解锁未来任务，旧 epoch 续期被拒，旧任务保持失败终态，新 epoch 与新任务可重新接受；
+- 下一门禁是在真实 MAVROS/PX4 环境验证状态断流、Service 断链、租约过期、本机 HOLD、飞控 failsafe 与安全 END，不得用 mock 证据替代。
 
 ### Phase 6：实机联调
 
-- 在不上桨条件下冻结并验证真实机载的身份/IP/namespace、坐标系/yaw、阈值、断联与 PX4 failsafe；
+- 在不上桨条件下冻结并验证真实机载的身份/IP/namespace、坐标系/yaw、阈值、链路心跳、租约断联与 PX4 failsafe；
+- 验证 PX4 状态新鲜、connected、稳定 disarmed 的安全 END 门禁，以及 GCS/bridge 退出后的本机安全路径；
 - 完成现场安全职责、急停和场地许可签字后，才允许评估实机上桨；
 - 后续接入 EGO Planner、航线、编队与机间避碰，并逐步验证 `FOLLOW_ROUTE/FAULT_EXIT/HOVER` 闭环。
 
@@ -342,9 +347,9 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 3. `detail_stage` 与 `error_code` 的完整枚举；
 4. bridge Service 代理的端口分配和并发上限；
 5. GCS_A/UAV 重启后是否需要跨进程持久化活动任务与终态；
-6. 机载断联时 PX4/MAVROS 的独立 failsafe 策略。
+6. 机载断联时 PX4/MAVROS 的独立 failsafe 参数及现场验证结果；
 7. 实机不上桨联调的现场负责人、急停职责、验收阈值与证据归档位置；
-8. Phase 5 弱网故障注入的可复现网络模型、日志/rosbag 保存规范与通过阈值；
+8. MAVROS/PX4 租约断链测试采用无头 SITL 还是由操作员启动图形化 SITL，以及对应日志/rosbag 归档位置；
 9. EGO Planner、`FOLLOW_ROUTE`、leader-followers 编队和机间避碰的正式设计与仿真验收方案。
 
 ## `implementation_plan_26080804.md` 完成度审计（2026-08-08）
@@ -367,3 +372,14 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 | 12 后续能力设计 | 未完成 | 仅保留稳定扩展边界，尚无 EGO/航线/编队/避碰的正式设计与仿真测试产物。 |
 
 因此可声明 **Phase 4 首版及 PX4 SITL 主动飞行验证完成**；不可声明 **GCS_A + 机载完整弱网仿真最终验收完成**，也不可声明 **实机不上桨或上桨验收完成**。
+
+## `implementation_plan_26080900.md` 完成度审计（2026-08-09）
+
+该冻结计划已移至 `plans/`。本轮已完成共享安全接口、GCS_A 链路健康与租约协调、executor 本地 watchdog/锁存 HOLD、Group A Topic/Service 拓扑、自动化回归，以及 mock 双/三 Master 的断链与恢复闭环验证。
+
+当前结论：
+
+- 可声明 **mock 环境下 Phase 5 跨 Master 通信安全闭环完成**；
+- 尚未执行真实 MAVROS/PX4 的状态断流、Service 断链、租约过期与安全 END 验证；
+- 尚未执行 Phase 6 实机不上桨门禁；软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；
+- 在上述门禁完成前继续保持默认不自动 arm、不自动切 OFFBOARD，不得据此授予实机上桨许可。

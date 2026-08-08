@@ -93,3 +93,4 @@
 - Group A 拓扑加入不限频 `mavros/state` Topic 和逐机 `uav_safety_lease` Service 代理；集中参数位于 `config/link_safety_defaults.yaml`。
 - 进程级断链注入发现安全 END 后 executor 本地锁存没有释放路径；修复为仅在 END 安全判据通过后解锁未来任务，旧任务记录不删除、不重启。若解锁回调失败，END 返回 `LEASE_END_FAILED` 并保持原租约状态。
 - 本轮使用 mock executor 完成跨 Master 通信和安全状态机验证，不启动 PX4 SITL。既有三机 SITL 运动结果不能替代本轮租约的 MAVROS/PX4 验证，更不能替代 Phase 6 实机无桨门禁。
+- 冻结实施计划统一迁移到 `plans/`，会话交接统一迁移到 `handoffs/`；历史内容不回填改写，后续文档使用新目录。

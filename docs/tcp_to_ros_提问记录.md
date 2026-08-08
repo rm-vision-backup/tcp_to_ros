@@ -30,6 +30,14 @@
 
 方案的详细比较、冻结接口字段、聚合与超时约束见 `tcp_to_ros_后续开发计划.md`，不再在此重复。
 
+## 通信安全闭环研讨结论（2026-08-09）
+
+- 链路健康复用桥接后的 MAVROS state，上行心跳只证明最近一次观测链路可达，不保证后续反向 HOLD 可达；
+- GCS_A 负责健康门禁、参与机 LOST 的整组失败及其他可达参与机 HOLD，故障机由本地飞行安全租约 watchdog 接管；
+- 配置启用不等于必须上电，任务参与集只来自当前 `assignments`，飞行会话集可跨同 mission 的多个任务批次；
+- 租约过期与旧 epoch 恢复均锁存，只有安全 END 才解锁未来任务；旧任务终态不得复活；
+- mock 多 Master 闭环已经完成，但不替代 MAVROS/PX4 租约断链或 Phase 6 实机不上桨门禁。
+
 ## 后续待确认事项
 
 1. GCS_A 最终实际 IP、hostname 和部署位置；
@@ -38,7 +46,7 @@
 4. bridge Service 代理的端口分配和并发上限；
 5. GCS_A/UAV 重启后是否持久化活动任务与终态；
 6. 真实机载动作层对稳定悬停、航线完成和受控退出的判据；
-7. PX4/MAVROS 在机载断联时的独立 failsafe 策略。
-8. Phase 5 弱网故障注入模型、通过阈值和原始日志/rosbag 归档规范；
+7. PX4/MAVROS 在机载断联时的独立 failsafe 参数及现场验证结果；
+8. MAVROS/PX4 租约断链使用无头 SITL 还是操作员启动图形化 SITL，以及原始日志/rosbag 归档位置；
 9. 实机不上桨现场负责人、急停职责、坐标系/yaw/阈值与 MAVROS namespace 冻结结果；
 10. EGO Planner、航线、leader-followers 编队和机间避碰的 driver/coordinator/provider 边界与仿真验收方案。
