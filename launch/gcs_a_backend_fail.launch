@@ -6,6 +6,7 @@
   <arg name="confirm_deadline_s" default="4.0" />
 
   <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
+    <rosparam command="load" file="$(find tcp_to_ros)/config/link_safety_defaults.yaml" />
     <param name="action_name" value="/group_a/execute_task" />
     <param name="emergency_hold_service" value="/group_a/emergency_hold" />
     <param name="map_file" value="$(arg map_file)" />
@@ -20,6 +21,7 @@
     <arg name="uav_id" value="A01" />
     <arg name="result_delay_s" value="25.0" />
     <arg name="message" value="mock uav1 task finished" />
+    <arg name="safety_lease_required" value="true" />
   </include>
 
   <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
@@ -29,6 +31,7 @@
     <arg name="final_success" value="false" />
     <arg name="error_code" value="MOCK_UAV2_FAIL" />
     <arg name="message" value="uav2 mock failed" />
+    <arg name="safety_lease_required" value="true" />
   </include>
 
   <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
@@ -36,5 +39,15 @@
     <arg name="uav_id" value="A03" />
     <arg name="result_delay_s" value="25.0" />
     <arg name="message" value="mock uav3 task finished" />
+    <arg name="safety_lease_required" value="true" />
   </include>
+  <node pkg="tcp_to_ros" type="mock_mavros_state_node.py" name="mock_state_uav1">
+    <param name="topic" value="/UAV1/mavros/state" />
+  </node>
+  <node pkg="tcp_to_ros" type="mock_mavros_state_node.py" name="mock_state_uav2">
+    <param name="topic" value="/UAV2/mavros/state" />
+  </node>
+  <node pkg="tcp_to_ros" type="mock_mavros_state_node.py" name="mock_state_uav3">
+    <param name="topic" value="/UAV3/mavros/state" />
+  </node>
 </launch>

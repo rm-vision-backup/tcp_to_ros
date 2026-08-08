@@ -52,6 +52,7 @@ catkin_install_python(PROGRAMS
   scripts/mock_backend_node.py
   scripts/task_event_injector.py
   scripts/gcs_a_backend_node.py
+  scripts/mock_mavros_state_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

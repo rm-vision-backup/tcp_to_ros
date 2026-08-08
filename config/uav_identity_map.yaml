@@ -5,6 +5,8 @@
 # 注意: 本文件为待复核配置。正式实机使用前必须人工复核
 #       exec_target / hostname / ip 与现场实际一致。
 # 仿真(单机多 Master)时使用 127.0.0.1 + port_offset, 见 swarm_topology_bridge 配置。
+# enabled 仅表示该身份可被任务解析和链路发现，不表示该机必须上电；
+# 每条任务的参与集始终仅来自 assignments。
 
 protocol_version: "1.0"
 group_id: "GroupA"
