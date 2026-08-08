@@ -84,3 +84,12 @@
 - A01/A02/A03 并发 `MOVE_TO` 均返回 `COMPLETED`，实测位置达到目标附近；安全补偿 HOLD 均被接受，5 秒位移分别为 0.099/0.105/0.121 m，小于 0.5 m 验收阈值；
 - 该结果完成 direct MAVROS 的 PX4 SITL 主动飞行门禁，但不替代真实硬件不上桨、实机 PX4 failsafe 或上桨验收；
 - 对冻结计划 `implementation_plan_26080804.md` 的 12 个步骤完成审计：8 项完成、2 项部分完成、2 项未完成。代码与文档主链路已收口，剩余为完整跨 Master 弱网证据、实机不上桨安全联调和 EGO/航线/编队/避碰正式设计。
+
+## 阶段十三，对应 Phase 5：跨 Master 链路健康与飞行安全租约（2026-08-09）
+
+- 共享接口新增 `UavLinkHealth` 与 `UavSafetyLease`；GCS_A 使用接收端单调时钟维护逐机 `DISCOVERED/HEALTHY/SUSPECT/LOST/RECOVERED`，参与集严格来自当前 assignments。
+- executor 增加单调时钟租约 watchdog、任务门禁、过期本地同步 HOLD 与锁存；MAVROS 的安全 END 要求 state 新鲜、已连接、稳定 disarmed。
+- GCS_A 在原绝对 4 秒接受预算内并发执行健康门禁、START 和任务确认，活动会话以 1 Hz 并发 RENEW；参与机 LOST 终止整组，故障机依赖本地租约 HOLD，其他可达参与机由 GCS 远程 HOLD。
+- Group A 拓扑加入不限频 `mavros/state` Topic 和逐机 `uav_safety_lease` Service 代理；集中参数位于 `config/link_safety_defaults.yaml`。
+- 进程级断链注入发现安全 END 后 executor 本地锁存没有释放路径；修复为仅在 END 安全判据通过后解锁未来任务，旧任务记录不删除、不重启。若解锁回调失败，END 返回 `LEASE_END_FAILED` 并保持原租约状态。
+- 本轮使用 mock executor 完成跨 Master 通信和安全状态机验证，不启动 PX4 SITL。既有三机 SITL 运动结果不能替代本轮租约的 MAVROS/PX4 验证，更不能替代 Phase 6 实机无桨门禁。

@@ -369,3 +369,53 @@ GCS_A 安全边界测试覆盖：非参与机/错误 exec_target 状态丢弃、
 
 - direct MAVROS 的三机身份隔离、非阻塞任务接收、持续 position setpoint、OFFBOARD `MOVE_TO` 到达判据、终态 Topic 和高优先级 HOLD 捕获均通过主动飞行验证。
 - 本轮不覆盖自动 arm/自动切 OFFBOARD（设计上默认禁止）、真实机体坐标系与 yaw 标定、实机 PX4 failsafe、上桨安全责任、弱网/重连以及 EGO Planner/航线/编队/机间避碰。
+
+---
+
+# Phase 5 跨 Master 通信安全闭环（2026-08-09）
+
+## 自动化回归
+
+| 范围 | 结果 |
+|---|---|
+| `catkin build tcp_to_ros --no-deps` | 成功 |
+| `catkin run_tests tcp_to_ros --no-deps` | 23 tests，0 error，0 failure |
+| `catkin build swarm_uav_executor --no-deps` | 成功 |
+| `catkin run_tests swarm_uav_executor --no-deps` | 36 tests，0 error，0 failure |
+| launch XML、YAML、Python 语法、`git diff --check` | 全部通过 |
+
+executor 测试由 34 项增至 36 项，新增安全 END 解锁和 END 回调失败保持锁存的回归覆盖。
+
+## 双 Master Topic 与 Service 冒烟
+
+- 使用独立 ROS Master 和隔离 ZMQ 端口启动 UAV1 与 GCS_A；UAV1 本地 `/mavros/state` 成功转发为 GCS_A 的 `/UAV1/mavros/state`。
+- GCS_A `/group_a/uav_link_health` 报告 `A01/HEALTHY/connected=true`。
+- 从 GCS_A Master 调用 `/UAV1/uav_safety_lease`，跨 bridge 的 `START → RENEW → END` 均返回 `accepted=true`，状态依次为 `ACTIVE → ACTIVE → INACTIVE`。
+- 验证环境已有 11312-11314/SITL 进程占用默认 ZMQ 端口；本轮保留既有工作负载，使用临时端口副本完成隔离验证，没有修改产品默认端口。
+
+## 三 Master 双参与机断链注入
+
+参与机为 A01/A02，mock 动作延长至 20 秒。两机达到稳定 HEALTHY 并接受任务后，停止 A01 bridge，切断其状态 Topic 和 Service 链路：
+
+- A01 健康状态按阈值经过 `HEALTHY → SUSPECT → LOST`；
+- Action 返回 `FAILED`，`failed_uavs=A01`，`error_code=UAV_LINK_LOST`；
+- A01 未收到跨机远程 HOLD，租约 TTL 到期后本地任务进入 `FAILED/LEASE_EXPIRED`；
+- A02 仍可达，收到 GCS_A 远程 HOLD，任务进入 `FAILED/COMMAND_HELD`；
+- 续租 Service 断开可能先于 5 秒健康 LOST 判据形成 `UAV_LINK_LOST`，最终健康 Topic 仍完整记录 SUSPECT/LOST；两条路径均保持同一安全失败语义。
+
+## 恢复与旧任务不复活
+
+节点级序列为 `START(epoch-old) → task c1 → TTL 过期 → RENEW(epoch-old) → END(epoch-old) → START(epoch-new) → task c2`：
+
+- c1 过期后保持 `FAILED/LEASE_EXPIRED`；旧 epoch 的 RENEW 返回 `LEASE_EXPIRED`；
+- mock driver 明确满足安全 END，END 返回 `INACTIVE`；
+- 新 epoch START 后 c2 可进入 `ACCEPTED`；再次查询 c1 仍为原失败终态，未恢复旧目标；
+- 故障注入由此发现并修复 executor 安全 END 后未释放本地任务锁存的问题，修复提交为 `a486a8d`。
+
+## 提交与验收边界
+
+- `swarm_uav_interfaces`: `a1a4b14 feat(safety): define UAV safety contracts`
+- `swarm_uav_executor`: `c0ab554`, `1341d5c`, `a486a8d`
+- `tcp_to_ros`: `c82e458`, `959b2dd`, `71a2dd7`
+- 可声明：mock 环境下 Group A 跨 Master 健康监测、租约代理、参与机 LOST 聚合、本地/远程 HOLD 分工及安全恢复闭环通过。
+- 不可声明：MAVROS/PX4 租约故障注入、Phase 6 实机无桨门禁或实机上桨许可通过。软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前保持默认不自动 arm、不自动切 OFFBOARD。

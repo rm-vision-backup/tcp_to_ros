@@ -69,7 +69,7 @@ roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=f
 roslaunch tcp_to_ros gcs_a_backend.launch
 ```
 
-- 依赖解析：跨 Master 的 `UavTask`/`UavHold` Service 与 `UavTaskState` Topic 由 `swarm_topology_bridge` 的通用桥（Topic 桥 + Service 代理）转发；
+- 依赖解析：跨 Master 的 `UavTask`/`UavHold`/`UavSafetyLease` Service，以及 `UavTaskState`/`mavros_msgs/State` Topic，由 `swarm_topology_bridge` 的通用桥（Topic 桥 + Service 代理）转发；GCS_A 侧 MAVROS 状态名为 `/UAV{n}/mavros/state`；
 - 端口规划与命名约定见 `config/topology_group_a_sim.yaml`（port_offset 区分单机多 Master，实机 port_offset=0）。
 
 ### 3. 与 runtime 的 TCP 联调（旧 mock 闭环）
