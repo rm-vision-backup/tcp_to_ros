@@ -56,6 +56,7 @@ catkin_install_python(PROGRAMS
 if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_gcs_a_aggregation.py)
   catkin_add_nosetests(test/test_link_health.py)
+  catkin_add_nosetests(test/test_safety_lease.py)
   catkin_add_nosetests(test/test_tcp_disconnect_safety.py)
 endif()
 
