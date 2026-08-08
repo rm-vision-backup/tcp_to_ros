@@ -101,3 +101,19 @@
 ## 动作 driver
 
 指单机执行器与具体运动实现之间的可替换端口。首版实现确定性 mock 与 direct MAVROS position-setpoint；未来 EGO Planner、航线和编队能力通过新 driver 或上层协调器接入，不改变冻结的跨机接口。
+
+## direct MAVROS driver
+
+指首版直接向本机 MAVROS 持续发布 position setpoint，并以本机 pose/state 健康与连续稳定窗口判断 `MOVE_TO`/HOLD 的动作 driver。它默认不自动 arm、不自动切换 OFFBOARD，也不拥有其他 UAV 的控制权。
+
+## 不上桨联调
+
+指真实机体连接但不允许推进器产生飞行动力的现场安全验证，用于冻结身份/IP/namespace、坐标系/yaw、阈值、断联与 PX4 failsafe。单元测试、fake callback 和 PX4 SITL 均不能替代该门禁。
+
+## PX4 SITL 主动飞行
+
+指在 PX4 Software-In-The-Loop 中由仿真飞行器实际响应 setpoint 的闭环验证。它可以证明 executor、MAVROS、OFFBOARD 与仿真动力学链路成立，但不等价于真实硬件不上桨或实机上桨验收。
+
+## 弱网验收
+
+指在跨 ROS Master bridge 链路上以可复现方式注入重连、丢包、Service 超时和迟响应，并归档状态 Topic 聚合、4 秒整组确认边界及 HOLD 补偿证据的 Phase 5 门禁。进程内 fake callback 只验证逻辑边界，不构成完整弱网验收。

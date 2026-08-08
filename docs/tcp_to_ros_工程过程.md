@@ -75,4 +75,12 @@
 - 新建独立 `swarm_uav_executor`，每实例绑定 `(uav_id, exec_target)`，实现 TaskStore、状态报告、单活动任务、HOLD 抢占、mock 与 direct MAVROS driver；
 - 新 executor mock 通过等价回归后，删除旧 `scripts/uav_mock_node.py`，避免 GCS 包与机载包并存两套执行语义；
 - GCS_A 补齐参与机/exec_target/status_seq 状态过滤、共享绝对确认 deadline、迟响应隔离、Action cancel 与 TCP 断线 HOLD 补偿；
-- 自动化证据：executor 22/22、tcp_to_ros 7/7，通过三包联合构建；PX4 SITL、真实弱网和不上桨现场记录仍待外部环境。
+- 自动化证据：executor 22/22、tcp_to_ros 7/7，通过三包联合构建；三机 PX4 SITL 主动飞行已验证 direct MAVROS `MOVE_TO + HOLD`，真实弱网和实机不上桨现场记录仍待外部环境。
+
+## 阶段十二，对应 Phase 4/5：三机 PX4 SITL 主动飞行与计划审计
+
+- 使用 `safe_valley_exp/multi_uav_sim.launch` 启动仿真，GCS_A 与 UAV1..3 分属四个 ROS Master，三套 bridge 和 direct `MavrosPositionDriver` executor 接入 `iris_0..2`；
+- 保持 `auto_arm=false`、`auto_offboard=false`，由操作员确认约 30 Hz setpoint 后手动解锁、起飞和切换 OFFBOARD；
+- A01/A02/A03 并发 `MOVE_TO` 均返回 `COMPLETED`，实测位置达到目标附近；安全补偿 HOLD 均被接受，5 秒位移分别为 0.099/0.105/0.121 m，小于 0.5 m 验收阈值；
+- 该结果完成 direct MAVROS 的 PX4 SITL 主动飞行门禁，但不替代真实硬件不上桨、实机 PX4 failsafe 或上桨验收；
+- 对冻结计划 `implementation_plan_26080804.md` 的 12 个步骤完成审计：8 项完成、2 项部分完成、2 项未完成。代码与文档主链路已收口，剩余为完整跨 Master 弱网证据、实机不上桨安全联调和 EGO/航线/编队/避碰正式设计。

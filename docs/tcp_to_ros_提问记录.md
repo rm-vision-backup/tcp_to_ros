@@ -6,7 +6,7 @@
 
 1. 包结构：第一版单包先行；包名 `tcp_to_ros`（语义 `tcp-to-ros`）。
 2. ROS 接口：主接口 Action + Topic（持续状态） + Service（紧急悬停）。
-3. 适配边界：`tcp_to_ros` 只做数据适配，不实现真实控制；真实控制后续以新增 backend 或功能包接入。
+3. 适配边界：`tcp_to_ros` 只做地面站接入、分发与聚合，不实现真实控制；机载统一执行由独立 `swarm_uav_executor` 通过可替换 driver 接入。
 4. 第一版验收：先跑通 A 组六任务，由 mock 自动回复验证通信与语义对接。
 5. mock 方式：参数化自动回复，覆盖成功、失败、超时场景。
 
@@ -15,7 +15,7 @@
 - Group A 地面站只服务本组 runtime；
 - 默认本机或局域网可达，不在代码写死 IP；
 - Group A 与 Group B 地面站暂不通信；
-- 真实机载控制接口后续再抽取。
+- 共享接口已抽离到 `swarm_uav_interfaces`；首版机载执行器只实现 `MOVE_TO + HOLD`，未来能力不得反向污染 GCS 或 bridge。
 
 ## 跨机通信方案研讨结论（摘要）
 
@@ -39,3 +39,6 @@
 5. GCS_A/UAV 重启后是否持久化活动任务与终态；
 6. 真实机载动作层对稳定悬停、航线完成和受控退出的判据；
 7. PX4/MAVROS 在机载断联时的独立 failsafe 策略。
+8. Phase 5 弱网故障注入模型、通过阈值和原始日志/rosbag 归档规范；
+9. 实机不上桨现场负责人、急停职责、坐标系/yaw/阈值与 MAVROS namespace 冻结结果；
+10. EGO Planner、航线、leader-followers 编队和机间避碰的 driver/coordinator/provider 边界与仿真验收方案。

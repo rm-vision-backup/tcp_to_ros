@@ -1,5 +1,9 @@
 # tcp_to_ros 测试记录
 
+## 文档说明
+
+本文按时间追加保存验证证据。开头“测试范围/当前限制/下一阶段进入条件”仅描述第一版 mock 闭环的历史基线，不代表当前项目状态；当前能力与边界以文末最新日期章节为准。
+
 ## 目标
 
 - 记录 `tcp_to_ros` 第一版适配层联调结果；
@@ -126,6 +130,8 @@ python3 src/tcp_to_ros/test/test_hold_interrupt.py
 当前结论只说明 **TCP-ROS 适配层闭环成立**，不代表真实机载执行链路已完成。
 
 ## 当前限制
+
+以下为第一版 mock 闭环完成时的历史限制；当前状态以文末最新验证章节为准。
 
 - 仍未接入真实机载程序；
 - 当前成功判据来自 mock backend，不来自 MAVROS 或机载动作层；
@@ -325,6 +331,41 @@ GCS_A 安全边界测试覆盖：非参与机/错误 exec_target 状态丢弃、
 
 - 可声明：GCS_A 核心链路达到机载接入基线；Phase 4 `MOVE_TO + HOLD` 首版代码、mock、direct MAVROS fake-callback 测试及单 Master ROS 闭环完成。
 - 不可声明：GCS_A 全部最终验收完成，或 direct MAVROS 已通过真实飞行验证。
-- 当前主机可发现 MAVROS 与 Gazebo，但无 PX4 SITL 可执行程序；因此 PX4 SITL、rosbag、真实 setpoint 流与 failsafe 交互未执行。
+- PX4 SITL 三机主动飞行验证已完成，详见下一节；该结果不等价于实机上桨验收。
 - 完整多 Master 弱网验收仍需归档：状态 Topic 经 bridge 的端到端聚合、网络重连/丢包、Service 代理超时与迟响应日志。
 - 上桨前仍必须现场冻结 A01-A15/hostname/IP、MAVROS namespace、坐标系/yaw、位置与 yaw 阈值、PX4 failsafe、急停职责及场地许可。
+
+## PX4 SITL 三机主动飞行验证（2026-08-08）
+
+### 环境与安全前提
+
+- 仿真由 `safe_valley_exp/multi_uav_sim.launch` 启动 4 架 iris，本轮仅使用 `iris_0..2`，分别绑定 `A01/UAV1`、`A02/UAV2`、`A03/UAV3`；`iris_3` 不参与。
+- UAV1..3 分别使用独立 ROS Master `11312..11314`，GCS_A 使用 `11311`；三套 bridge、`swarm_uav_executor` 与 direct `MavrosPositionDriver` 均启动成功。
+- 启动参数确认 `driver=mavros_position`、`auto_arm=false`、`auto_offboard=false`；三机由操作员手动解锁、起飞至约 10 m 并稳定悬停。
+- 切换 OFFBOARD 前先确认三机 `/mavros/setpoint_position/local` 均持续约 30 Hz；随后经操作员授权调用 `/mavros/set_mode`。
+
+### MOVE_TO 结果
+
+任务 `mission_id=sitl-mavros-1786191967` 并发下发三个 30 s `MOVE_TO`：
+
+| UAV | 目标 `(x,y,z,yaw)` | Service 确认 | OFFBOARD 前 setpoint | 终态与实测位置 |
+|---|---|---|---|---|
+| A01/UAV1 | `(1,0,10,0)` | `accepted=True / ACCEPTED` | 29.997 Hz | `COMPLETED`；约 `(1.02,-0.03,10.01)` |
+| A02/UAV2 | `(0,1,10,0)` | `accepted=True / ACCEPTED` | 30.000 Hz | `COMPLETED`；约 `(0.03,0.98,10.03)` |
+| A03/UAV3 | `(-1,0,10,0)` | `accepted=True / ACCEPTED` | 29.984 Hz | `COMPLETED`；约 `(-0.96,-0.02,10.03)` |
+
+三机均保持 `armed=True / mode=OFFBOARD`。原始 `/uav_task_state` 记录同一任务键的 `ACCEPTED → COMPLETED`，终态重复发布符合 `StateReporter` 设计。
+
+一次临时验收脚本误将成功终态写成 `SUCCEEDED`，且未去除 `rostopic echo` YAML 字符串的双引号，因而在动作实际完成后误报失败。项目接口、executor、GCS_A 与既有测试的权威成功终态均为 `COMPLETED`；该误报不属于产品代码故障。
+
+### HOLD 结果
+
+- 误报路径触发三机安全补偿 `/UAVn/uav_hold`，三次调用均返回 `accepted=True / HOLD accepted`。
+- HOLD 捕获本机当前位置后继续以约 30 Hz 发布 setpoint，三机保持 armed/OFFBOARD。
+- 5 秒位置位移分别为 `0.099 m`、`0.105 m`、`0.121 m`，均小于本次 SITL 验收阈值 `0.5 m`。
+- executor 与 bridge 运行日志未发现 fatal、traceback、exception、driver unhealthy 或 setpoint/OFFBOARD failure。
+
+### SITL 结论
+
+- direct MAVROS 的三机身份隔离、非阻塞任务接收、持续 position setpoint、OFFBOARD `MOVE_TO` 到达判据、终态 Topic 和高优先级 HOLD 捕获均通过主动飞行验证。
+- 本轮不覆盖自动 arm/自动切 OFFBOARD（设计上默认禁止）、真实机体坐标系与 yaw 标定、实机 PX4 failsafe、上桨安全责任、弱网/重连以及 EGO Planner/航线/编队/机间避碰。

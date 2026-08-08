@@ -300,27 +300,30 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 
 ### Phase 4：机载执行适配层
 
-状态：**首版代码与自动化测试已完成，SITL/不上桨现场验收待外部环境完成。**
+状态：**首版代码、自动化测试、单 Master ROS 闭环及三机 PX4 SITL 主动飞行验证已完成；实机不上桨与上桨现场验收仍待完成。**
 
 - 已将共享接口一次性迁移至独立纯接口包 `swarm_uav_interfaces`；
 - 已实现独立单机包 `swarm_uav_executor`：任务/HOLD Service、幂等缓存、状态 Topic、身份隔离、单活动任务及 HOLD 抢占；
 - 已提供 `MockMotionDriver` 与 direct `MavrosPositionDriver`；direct driver 默认不 arm、不切 OFFBOARD；
-- 已用单元测试和单 Master rostest 验证 `MOVE_TO + HOLD`；真实坐标系、阈值、namespace 与 PX4 failsafe 尚未冻结，因此未取得上桨许可。
+- 已用单元测试、单 Master rostest 和三机 PX4 SITL 验证 `MOVE_TO + HOLD`；SITL 中验证了持续 position setpoint、OFFBOARD `MOVE_TO` 到达与 HOLD 捕获；
+- 自动 arm/自动切 OFFBOARD 仍按设计禁止；真实机体坐标系、yaw、阈值、namespace 与 PX4 failsafe 尚未现场冻结，因此未取得实机上桨许可。
 
 ### Phase 5：仿真联调
 
-状态：**核心 mock 链路与安全边界已有验证证据，完整可复现的多 Master 弱网验收仍需收口。**
+状态：**核心 mock 链路、安全边界及三机 PX4 SITL 主动飞行已有验证证据；完整可复现的多 Master 弱网验收仍需收口。**
 
 - 已用新 executor 替换旧 `tcp_to_ros/uav_mock_node.py`，单 Master 正常、重复幂等、单机失败即停回归通过；
 - GCS_A 已按参与 UAV/exec_target 聚合状态，并按 `status_seq` 丢弃重复与乱序状态；
 - 共享绝对 deadline 保证整组确认不按 UAV 数量串行放大；迟到 Service 响应不能把已超时尝试复活；
 - Action cancel 与 TCP 连接关闭均进入 HOLD 补偿路径，未确认 HOLD 会保留错误事实；
-- 尚需在独立 ROS Master + bridge 网络故障注入环境中归档完整 Topic、重连、丢包与迟响应端到端日志。
+- 三套独立 UAV ROS Master + bridge + direct MAVROS executor 已完成三机 `MOVE_TO` 与 HOLD 的 PX4 SITL 主动飞行；
+- 尚需在可复现的 bridge 网络故障注入环境中归档完整状态 Topic 聚合、4 秒边界、重连、丢包、Service 超时与迟响应端到端日志。
 
 ### Phase 6：实机联调
 
-- 接入真实机载动作层；
-- 验证 `MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER` 闭环。
+- 在不上桨条件下冻结并验证真实机载的身份/IP/namespace、坐标系/yaw、阈值、断联与 PX4 failsafe；
+- 完成现场安全职责、急停和场地许可签字后，才允许评估实机上桨；
+- 后续接入 EGO Planner、航线、编队与机间避碰，并逐步验证 `FOLLOW_ROUTE/FAULT_EXIT/HOVER` 闭环。
 
 当前仅实现 `MOVE_TO + HOLD`。`FOLLOW_ROUTE/FAULT_EXIT/HOVER`、EGO Planner、编队及机间避碰均为后续范围。
 
@@ -340,3 +343,27 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 4. bridge Service 代理的端口分配和并发上限；
 5. GCS_A/UAV 重启后是否需要跨进程持久化活动任务与终态；
 6. 机载断联时 PX4/MAVROS 的独立 failsafe 策略。
+7. 实机不上桨联调的现场负责人、急停职责、验收阈值与证据归档位置；
+8. Phase 5 弱网故障注入的可复现网络模型、日志/rosbag 保存规范与通过阈值；
+9. EGO Planner、`FOLLOW_ROUTE`、leader-followers 编队和机间避碰的正式设计与仿真验收方案。
+
+## `implementation_plan_26080804.md` 完成度审计（2026-08-08）
+
+该实施计划为冻结基准，不回填修改。按其 `[Implementation Order]` 的 12 个步骤审计当前证据：
+
+| 步骤 | 状态 | 当前证据与剩余缺口 |
+|---|---|---|
+| 1 建立基线 | 完成 | Phase 1-3 构建、单 Master 回归和跨 Master Service 冒烟已有记录。 |
+| 2 接口独立仓库 | 完成 | `swarm_uav_interfaces` 已独立建仓，3 msg + 2 srv、README、构建与类型检查完成。 |
+| 3 一次性类型迁移 | 完成 | 消费方已切换到新类型，旧共享定义和运行时 import 已删除。 |
+| 4 executor 骨架 | 完成 | models、validation、TaskStore、StateReporter、MotionDriver 与包骨架已落地。 |
+| 5 mock driver | 完成 | 非阻塞接收、身份隔离、幂等/冲突、busy、timeout、状态序号和 HOLD 抢占已自动化验证。 |
+| 6 替换旧 mock | 完成 | integration launch 已使用新 executor；旧 `uav_mock_node.py` 已删除，等价回归通过。 |
+| 7 跨 Master Phase 5 | 部分完成 | 进程内状态过滤、绝对 deadline、cancel/断线 HOLD 已自动化验证；仍缺完整 bridge 网络故障注入和端到端证据归档。 |
+| 8 direct MAVROS | 完成 | fake-callback 单测与三机 PX4 SITL 主动飞行均已通过；默认不自动 arm/mode。 |
+| 9 不上桨安全联调 | 未完成 | fake callback 与 SITL 不能替代真实硬件不上桨、断联和 PX4 failsafe 现场验证。 |
+| 10 文档与证据 | 完成 | CONTEXT、Phase 状态、过程、测试证据、未决问题与交接均已收口；弱网/不上桨本身仍分别属于步骤 7/9。 |
+| 11 独立提交 | 完成 | 两个新仓库与消费方已有独立 Conventional Commits；新仓库无 remote、未 push。 |
+| 12 后续能力设计 | 未完成 | 仅保留稳定扩展边界，尚无 EGO/航线/编队/避碰的正式设计与仿真测试产物。 |
+
+因此可声明 **Phase 4 首版及 PX4 SITL 主动飞行验证完成**；不可声明 **GCS_A + 机载完整弱网仿真最终验收完成**，也不可声明 **实机不上桨或上桨验收完成**。
