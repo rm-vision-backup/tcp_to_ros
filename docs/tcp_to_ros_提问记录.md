@@ -32,6 +32,8 @@
 
 ## 通信安全闭环研讨结论（2026-08-09）
 
+- 2026-08-10 补充：已使用真实 MAVROS + PX4 SITL（11300 仿真、A01/UAV1）完成状态断流、Service 断链、租约过期、本机 HOLD、链路恢复与安全 END 门禁验证，详见 `tcp_to_ros_测试记录.md`。
+
 - 链路健康复用桥接后的 MAVROS state，上行心跳只证明最近一次观测链路可达，不保证后续反向 HOLD 可达；
 - GCS_A 负责健康门禁、参与机 LOST 的整组失败及其他可达参与机 HOLD，故障机由本地飞行安全租约 watchdog 接管；
 - 配置启用不等于必须上电，任务参与集只来自当前 `assignments`，飞行会话集可跨同 mission 的多个任务批次；
@@ -47,6 +49,6 @@
 5. GCS_A/UAV 重启后是否持久化活动任务与终态；
 6. 真实机载动作层对稳定悬停、航线完成和受控退出的判据；
 7. PX4/MAVROS 在机载断联时的独立 failsafe 参数及现场验证结果；
-8. MAVROS/PX4 租约断链使用无头 SITL 还是操作员启动图形化 SITL，以及原始日志/rosbag 归档位置；
+8. 已确认并完成：MAVROS/PX4 租约断链采用操作员启动图形化 SITL（`safe_valley_exp/multi_uav_sim.launch`，ROS Master 11300）+ 独立 UAV1 Master(11312)；证据归档于 `docs/tcp_to_ros_测试记录.md`（2026-08-10 章节）。
 9. 实机不上桨现场负责人、急停职责、坐标系/yaw/阈值与 MAVROS namespace 冻结结果；
 10. EGO Planner、航线、leader-followers 编队和机间避碰的 driver/coordinator/provider 边界与仿真验收方案。

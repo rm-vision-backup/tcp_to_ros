@@ -87,6 +87,8 @@ python3 src/tcp_to_ros/test/test_gcs_a_backend_client.py --uavs A01,A02,A03 \
 - 重复 `command_id`：仍返回缓存 `COMPLETED`（幂等）；
 - 失败即停：改用 `gcs_a_backend_fail.launch`（UAV2 mock 注入失败），期望 `FAILED` / failed_uavs=A02 / error=`MOCK_UAV2_FAIL`，并对活动 UAV 执行 HOLD 确认。
 
+> 真实 MAVROS/PX4 验证（2026-08-10，操作员控制飞行、经授权切 OFFBOARD）：`MOVE_TO` 完成并到达、UAV1 bridge 断链注入触发 `HEALTHY→SUSPECT→LOST` 与本地租约过期 HOLD、链路恢复后旧租约锁存（RENEW/START/END 全拒）、地面安全 END 门禁全套通过。原始证据见 `docs/tcp_to_ros_测试记录.md`。
+
 ### 2. Group A 多 Master 仿真拓扑
 
 ```bash

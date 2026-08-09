@@ -2,7 +2,8 @@
 
 ## 文档说明
 
-本文按时间追加保存验证证据。开头“测试范围/当前限制/下一阶段进入条件”仅描述第一版 mock 闭环的历史基线，不代表当前项目状态；当前能力与边界以文末最新日期章节为准。
+本文按时间追加保存功能测试的操作步骤和结果，用于验证证据。
+开头“测试范围/当前限制/下一阶段进入条件”仅描述第一版 mock 闭环的历史基线，不代表当前项目状态；当前能力与边界以文末最新日期章节为准。
 
 ## 目标
 
@@ -419,3 +420,75 @@ executor 测试由 34 项增至 36 项，新增安全 END 解锁和 END 回调�
 - `tcp_to_ros`: `c82e458`, `959b2dd`, `71a2dd7`
 - 可声明：mock 环境下 Group A 跨 Master 健康监测、租约代理、参与机 LOST 聚合、本地/远程 HOLD 分工及安全恢复闭环通过。
 - 不可声明：MAVROS/PX4 租约故障注入、Phase 6 实机无桨门禁或实机上桨许可通过。软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前保持默认不自动 arm、不自动切 OFFBOARD。
+
+---
+
+# 真实 MAVROS/PX4 租约断链、OFFBOARD MOVE_TO 与安全 END 门禁验证（2026-08-10）
+
+## 环境与部署
+
+- 仿真由用户启动在 `safe_valley_exp/multi_uav_sim.launch` 的 **ROS Master 11300**（此版本已包含 `single_vehicle_spawn_xtd.launch`，4 架 iris）；本轮仅使用 `iris_0 ↔ A01/UAV1`，其余 3 架不参与。
+- UAV1 独立 ROS Master 11312 + MAVROS `udp://:24540@127.0.0.1:34580`、`tgt_system:=1`；MAVROS 自动对接新仿真的 `iris_0 (34580)`。
+- 测试基础设施：UAV1 bridge（11312，`run_uav_mock:=false`）+ GCS_A bridge（11300，`run_uav_mock:=false`）+ `uav_executor_mavros.launch`（`A01/UAV1`，`interfaces_version:=sitl-lease-validation`）+ `gcs_a_backend.launch`（11300）。
+- 安全基线：`driver=mavros_position`、`auto_arm=false`、`auto_offboard=false`、executor launch 强制 `safety_lease/required_for_tasks=true`；全程未自动 arm、未自动切 OFFBOARD；飞行控制由操作员手动执行。
+
+## OFFBOARD MOVE_TO 主链路
+
+操作员手动 arm + takeoff 至约 10 m（`AUTO.LOITER`），确认 `/mavros/setpoint_position/local` 持续约 30 Hz 后，经操作员授权调用 `/mavros/set_mode custom_mode:=OFFBOARD`。
+
+任务 `lease-dl-validate/move3`（`MOVE_TO` 目标 `(0,1,10,0)`，45 s）：
+
+| 项 | 结果 |
+|---|---|
+| Goal | `GOAL_SENT lease-dl-validate/move3 target=(0,1,10)` |
+| 终态 | `final=COMPLETED completed=[A01] failed=[]` |
+| setpoint | 持续 30 Hz，目标 `(0,1,10)` |
+| 实测位置 | `(0.019, 1.033, 10.011)`（符合 0.2 m/0.15 rad 容差） |
+| 模式 | `armed=True / mode=OFFBOARD` |
+
+整链路（GCS Action → GCS_A bridge → ZMQ → UAV1 bridge → executor → driver → MAVROS → PX4）在 OFFBOARD 下验证通过。
+
+同日早前两次尝试（move1/move2）未飞的真因：当时飞机处于 `AUTO.LOITER`，PX4 不执行外部 position setpoint；且测试客户端约 40 s 自动取消触发 executor 高优先级本地 HOLD（捕获位姿持续 30 Hz）。该行为恰证明 HOLD 捕获机制真实工作，不属于产品故障。
+
+## 租约断链验证（故障注入）
+
+基线：`/group_a/uav_link_health` 报告 `A01/HEALTHY connected=True`。
+
+注入：停止 UAV1 bridge（PID 394038，仅 agent 进程；MAVROS/仿真未动）。等待约 9 s 后的证据：
+
+| 验证点 | 证据 |
+|---|---|
+| GCS 链路过渡 | `HEALTHY → SUSPECT（age=3.066s）→ LOST（age=5.070s）`，reason=`valid MAVROS heartbeat timed out` |
+| 执行端租约 | `safety lease expired and local HOLD latched mission=lease-dl-validate epoch=89d68abe-3632-450c-b4df-2fb3e205b134`（logerr） |
+| 本地安全兜底 | HOLD 捕获位姿持续约 30 Hz 发布 setpoint，`armed=True / mode=OFFBOARD` 未失控（实测悬停稳定） |
+
+恢复：重启 UAV1 bridge 后链路恢复 `HEALTHY（age≈0.48s）`，bridge 端口 4300/4301/14100 回归。
+
+锁存验证（直接调 executor 租约 Service）：
+
+- 旧 epoch RENEW → `accepted=False / EXPIRED_HOLD / LEASE_SEQ_STALE（lease_seq moved backwards）`
+- 新 epoch START（同 mission）→ `accepted=False / EXPIRED_HOLD / LEASE_EPOCH_CONFLICT（a lease epoch is already active）`
+- END（EXPIRED_HOLD 下）→ 同样被锁存拒绝 `LEASE_SEQ_STALE`
+- 结论：断链 → 租约过期 → `EXPIRED_HOLD` 后 RENEW/START/END 全部不可解除，唯一恢复路径是外部人工干预（重启 executor），旧任务零复活路径。与 mock 阶段验证一致并首次在真实 MAVROS/PX4 链路复现。
+
+## 安全 END 门禁验证（地面 disarm 全套）
+
+操作员降落后 `armed=False / AUTO.LAND`；重启 executor（解除旧 latch），在稳定 disarmed 下执行：
+
+| 步骤 | 预期/实际 |
+|---|---|
+| `START` 新 session（epoch-A，disarm 稳定） | `accepted=True / ACTIVE` |
+| 同 epoch 再 `START` | 拒绝 `LEASE_EPOCH_CONFLICT` |
+| `END`（disarm 稳定 ≥3 s） | `accepted=True / INACTIVE`（记录被清除） |
+| 已 END 的 epoch-A 再 `START` | 拒绝 `LEASE_EPOCH_CONFLICT`（ended epoch cannot restart） |
+| 新 epoch-B `START` | `accepted=True / ACTIVE` |
+| 旧 mission 任务复现（`lease-dl-validate` 新 command_id） | 拒绝 `LEASE_EXPIRED`（local safety HOLD is latched） |
+
+验证覆盖：安全 END 清除旧 epoch/释放本地锁存、新 epoch 可启动、旧任务不复活。
+
+## 结论与边界
+
+- 本轮完成了 handoff 与后续开发计划中标记为"待执行"的 **MAVROS/PX4 租约断链验证**与**安全 END 门禁验证**；均为真实 MAVROS + PX4 SITL 链路，非 mock。
+- 全程未触发也未验证 PX4 自身 datalink/offboard/RC loss failsafe（按本轮分工，不进行 PX4 failsafe 警告类验证）；PX4 版本确认为 `v1.13.2-dirty (xtdrone/dev)`，其 failsafe 参数（`COM_DL_LOSS_T/NAV_DLL_ACT/NAV_RCL_ACT/COM_OBL_ACT/COM_OBL_RC_ACT/CBRK_FLIGHTTERM`）已从源码核对并留存，仅供现场实机门禁参考。
+- 仍不可声明：Phase 6 实机无桨门禁或实机上桨许可。软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前保持默认不自动 arm、不自动切 OFFBOARD。
+- 本轮未修改任何仓库代码；仅启动/停止测试进程并在测试后全清理（仅保留用户 11300 仿真）。

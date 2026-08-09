@@ -94,3 +94,14 @@
 - 进程级断链注入发现安全 END 后 executor 本地锁存没有释放路径；修复为仅在 END 安全判据通过后解锁未来任务，旧任务记录不删除、不重启。若解锁回调失败，END 返回 `LEASE_END_FAILED` 并保持原租约状态。
 - 本轮使用 mock executor 完成跨 Master 通信和安全状态机验证，不启动 PX4 SITL。既有三机 SITL 运动结果不能替代本轮租约的 MAVROS/PX4 验证，更不能替代 Phase 6 实机无桨门禁。
 - 冻结实施计划统一迁移到 `plans/`，会话交接统一迁移到 `handoffs/`；历史内容不回填改写，后续文档使用新目录。
+
+
+## 阶段十四，对应 Phase 5：真实 MAVROS/PX4 租约断链与安全 END 门禁（2026-08-10）
+
+- 用户将仿真层切换到 `safe_valley_exp/multi_uav_sim.launch` 的 ROS Master 11300（4 架 iris），UAV1 独立 Master 11312 + MAVROS（`udp://:24540@127.0.0.1:34580`、`tgt_system:=1`）自动对接 `iris_0`。
+- 测试进程：UAV1 bridge（11312，`run_uav_mock:=false`）、GCS_A bridge（11300，`run_uav_mock:=false`）、`uav_executor_mavros.launch`（A01/UAV1，`interfaces_version:=sitl-lease-validation`）、`gcs_a_backend.launch`（11300）。保持 `auto_arm=false`、`auto_offboard=false`。
+- 操作员手动 arm + takeoff 至约 10 m；确认 `/mavros/setpoint_position/local` 约 30 Hz 后经授权 `set_mode OFFBOARD`。`MOVE_TO(0,1,10)` 返回 `COMPLETED`，实测 `(0.019, 1.033, 10.011)`。
+- 故障注入（停止 UAV1 bridge）：GCS 链路 `HEALTHY -> SUSPECT(3.066s) -> LOST(5.070s)`；executor `safety lease expired and local HOLD latched`；本机 HOLD 捕获位姿持续 30 Hz，飞机未失控。重启 bridge 后链路恢复 `HEALTHY`。
+- 锁存验证：EXPIRED_HOLD 下 RENEW/START/END 均被拒（`LEASE_SEQ_STALE`/`LEASE_EPOCH_CONFLICT`）；安全 END 全套通过（START -> 同 epoch 拒 -> END 成功 -> 已 END 拒 -> 新 epoch 可启），旧任务 `FAILED/LEASE_EXPIRED` 不复活。
+- 这意味着后续开发计划/测试记录中标记为“待执行”的真实 MAVROS/PX4 租约断链与安全 END 门禁已完成；PX4 自身 datalink/offboard/RC failsafe 的现场验证仍属 Phase 6 实机无桨门禁，本轮按分工不进行 PX4 failsafe 警告类验证。
+- 详细证据见 `docs/tcp_to_ros_测试记录.md`（2026-08-10 章节），随后测试进程已全清理，仅保留用户 11300 仿真；本轮未修改任何仓库代码。

@@ -312,7 +312,7 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 
 ### Phase 5：仿真联调
 
-状态：**mock 跨 Master 通信安全闭环与既有三机 PX4 SITL 主动飞行均已有验证证据；MAVROS/PX4 租约断链验证仍待执行。**
+状态：**mock 跨 Master 通信安全闭环、既有三机 PX4 SITL 主动飞行，以及真实 MAVROS/PX4 租约断链与安全 END 门禁验证均已通过。**
 
 - 已用新 executor 替换旧 `tcp_to_ros/uav_mock_node.py`，单 Master 正常、重复幂等、单机失败即停回归通过；
 - GCS_A 已按参与 UAV/exec_target 聚合状态，并按 `status_seq` 丢弃重复与乱序状态；
@@ -321,7 +321,7 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 - 三套独立 UAV ROS Master + bridge + direct MAVROS executor 已完成三机 `MOVE_TO` 与 HOLD 的 PX4 SITL 主动飞行；
 - 已在隔离的双/三 Master mock 环境验证 MAVROS state Topic 与安全租约 Service 代理、`HEALTHY → SUSPECT → LOST`、参与机 LOST 整组失败、本地/远程 HOLD 分工及安全恢复；
 - 安全 END 后只解锁未来任务，旧 epoch 续期被拒，旧任务保持失败终态，新 epoch 与新任务可重新接受；
-- 下一门禁是在真实 MAVROS/PX4 环境验证状态断流、Service 断链、租约过期、本机 HOLD、飞控 failsafe 与安全 END，不得用 mock 证据替代。
+- 已在使用真实 MAVROS + PX4 SITL（11300 仿真、A01/UAV1）的单机链路验证状态断流、Service 断链、租约过期、本机 HOLD、链路恢复与安全 END 门禁（2026-08-10，详见测试记录）。剩余对 PX4 自身 datalink/offboard/RC failsafe 的现场验证仍在 Phase 6 实机无桨门禁范围内。
 
 ### Phase 6：实机联调
 
@@ -380,6 +380,6 @@ TCP 要求 5 秒内收到整组 `ACCEPTED`。GCS_A 必须：
 当前结论：
 
 - 可声明 **mock 环境下 Phase 5 跨 Master 通信安全闭环完成**；
-- 尚未执行真实 MAVROS/PX4 的状态断流、Service 断链、租约过期与安全 END 验证；
+- 已使用真实 MAVROS + PX4 SITL（11300 仿真、单机 A01/UAV1）验证状态断流、Service 断链、租约过期、本机 HOLD、链路恢复与安全 END 门禁（2026-08-10，详见测试记录）；
 - 尚未执行 Phase 6 实机不上桨门禁；软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；
 - 在上述门禁完成前继续保持默认不自动 arm、不自动切 OFFBOARD，不得据此授予实机上桨许可。
