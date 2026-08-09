@@ -3,6 +3,7 @@
 ## 文档说明
 
 本文按时间追加保存功能测试的操作步骤和结果，用于验证证据。
+此后每次实验验证，都同时记录启动步骤/流程和结果（启动命令、环境变量、端口、基线确认、操作动作、结果与清理）。
 开头“测试范围/当前限制/下一阶段进入条件”仅描述第一版 mock 闭环的历史基线，不代表当前项目状态；当前能力与边界以文末最新日期章节为准。
 
 ## 目标
@@ -431,6 +432,131 @@ executor 测试由 34 项增至 36 项，新增安全 END 解锁和 END 回调�
 - UAV1 独立 ROS Master 11312 + MAVROS `udp://:24540@127.0.0.1:34580`、`tgt_system:=1`；MAVROS 自动对接新仿真的 `iris_0 (34580)`。
 - 测试基础设施：UAV1 bridge（11312，`run_uav_mock:=false`）+ GCS_A bridge（11300，`run_uav_mock:=false`）+ `uav_executor_mavros.launch`（`A01/UAV1`，`interfaces_version:=sitl-lease-validation`）+ `gcs_a_backend.launch`（11300）。
 - 安全基线：`driver=mavros_position`、`auto_arm=false`、`auto_offboard=false`、executor launch 强制 `safety_lease/required_for_tasks=true`；全程未自动 arm、未自动切 OFFBOARD；飞行控制由操作员手动执行。
+
+## 启动与操作流程
+
+本节整理本轮仿真测试的完整启动与操作步骤，作为后续同类验证的复现基准。启动顺序自上而下，每步可用则继续下一步；飞行相关步骤必须由操作员控制并逐项确认。
+
+### 0. 前置与安全基线
+
+- 工作空间：`/home/ub20tg/catkin_swarm6-2`；ROS Noetic；`catkin build` 后 `source devel/setup.bash`。
+- 所有测试命令均需：`source /opt/ros/noetic/setup.bash && source /home/ub20tg/catkin_swarm6-2/devel/setup.bash`。
+- 全程遵守：不自动 arm、不自动切 OFFBOARD；arm/takeoff 由操作员手动；测试进程不触碰用户仿真。
+
+### 1. 仿真层（操作员手动启动，本会话主仿真端口为 11300）
+
+```bash
+roscd px4/launch   # 或直接使用 safe_valley_exp/launch/multi_uav_sim.launch
+export ROS_MASTER_URI=http://localhost:11300
+export ROS_HOSTNAME=localhost
+export GAZEBO_MASTER_URI=http://localhost:11345
+roslaunch px4 multi_uav_sim.launch
+```
+
+`multi_uav_sim.launch` 会启动 4 架 PX4 SITL（iris_0..3），`iris_0` 固定 UDP `34580`。启动后确认 4 架均 disarmed；本轮仅使用 `iris_0 ↔ A01/UAV1`。
+
+### 2. UAV1 机载层（独立 Master 11312 + MAVROS）
+
+先启动 UAV1 的 ROS Master：
+
+```bash
+set +x
+# 终端 1：roscore
+export ROS_MASTER_URI=http://127.0.0.1:11312
+export ROS_IP=127.0.0.1
+roscore -p 11312
+```
+
+再启动 MAVROS 对接 `iris_0`（端口与 `uav_offboard_sim.launch` 的 fcu_url 公式一致）：
+
+```bash
+# 终端 2：MAVROS
+export ROS_MASTER_URI=http://127.0.0.1:11312
+export ROS_IP=127.0.0.1
+roslaunch mavros px4.launch \
+  fcu_url:="udp://:24540@127.0.0.1:34580" \
+  tgt_system:=1
+```
+
+基线确认：`/mavros/state` 应 `connected=True / armed=False / mode=POSCTL`。
+
+### 3. 测试基础设施（UAV1 bridge + executor；GCS_A bridge + backend）
+
+UAV1 侧（Master 11312；`run_uav_mock:=false` 禁用 mock）：
+
+```bash
+# 终端 3：UAV1 bridge（ZMQ topic 4300/4301，service router 14100）
+export ROS_MASTER_URI=http://127.0.0.1:11312
+export ROS_IP=127.0.0.1
+roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV1 uav_id:=A01 run_uav_mock:=false
+
+# 终端 4：UAV1 executor（不 arm、不切 OFFBOARD；租约必需）
+export ROS_MASTER_URI=http://127.0.0.1:11312
+export ROS_IP=127.0.0.1
+roslaunch swarm_uav_executor uav_executor_mavros.launch \
+  uav_id:=A01 exec_target:=UAV1 state_topic:=/uav_task_state \
+  interfaces_version:=sitl-lease-validation
+```
+
+GCS_A 侧（仿真层 Master 11300；GCS_A 不跑 mock）：
+
+```bash
+# 终端 5：GCS_A bridge（从 UAV1 接收 topic/转 service）
+export ROS_MASTER_URI=http://127.0.0.1:11300
+export ROS_IP=127.0.0.1
+roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A uav_id:=A01 run_uav_mock:=false
+
+# 终端 6：GCS_A 分发后端（整组 Action）
+export ROS_MASTER_URI=http://127.0.0.1:11300
+export ROS_IP=127.0.0.1
+roslaunch tcp_to_ros gcs_a_backend.launch
+```
+
+启动后只读基线：`/UAV1/mavros/state` 经桥转发、`/group_a/uav_link_health` 报告 `A01/HEALTHY connected=True age<0.5s`、`/mavros/setpoint_position/local` 约 30 Hz、GCS 侧可见 `/UAV1/uav_task|uav_hold|uav_safety_lease` 服务。
+
+### 4. 飞行操作（操作员控制）
+
+1. 操作员在 QGC/遥控上手动 arm + takeoff 至约 10 m（`AUTO.LOITER`）。
+2. 确认 `/mavros/setpoint_position/local` 持续约 30 Hz。
+3. 经操作员授权后切换 OFFBOARD：
+
+```bash
+export ROS_MASTER_URI=http://127.0.0.1:11312
+rosservice call /mavros/set_mode "{custom_mode: 'OFFBOARD'}"
+```
+
+4. 下发 `MOVE_TO`（经 GCS 整组 Action，自动 START+续租）：
+
+```bash
+export ROS_MASTER_URI=http://127.0.0.1:11300
+python3 /tmp/swarm6-2_runtime_validation/send_move_to_goal.py <mission_id> <command_id> <x> <y> <z>
+```
+
+### 5. 租约断链验证（故障注入与恢复）
+
+```bash
+# 注入：仅停止 UAV1 bridge（agent 进程，不动 MAVROS/仿真）
+kill <uav1_bridge_pid>         # 本会话为 394038
+# 等待约 9 s：越过 3 s SUSPECT / 5 s LOST / 5 s 租约 TTL
+# 观察：/group_a/uav_link_health 出现 SUSPECT→LOST；
+#       executor 日志出现 "safety lease expired and local HOLD latched"
+# 恢复：重启 UAV1 bridge（同第 3 节命令），链路恢复 HEALTHY
+
+# 锁存验证（可选，直接调 executor 租约 Service）：
+# RENEW/START/END 在 EXPIRED_HOLD 下均返回 rejected（LEASE_SEQ_STALE / LEASE_EPOCH_CONFLICT）
+```
+
+### 6. 安全 END 门禁验证（地面 disarm 全套）
+
+```bash
+# 1) 操作员降落并 disarm（armed=False / AUTO.LAND）
+# 2) 重启 executor 解除旧 latch（停掉第 3 节 executor 后重新拉起）
+# 3) 地面执行租约 Service 序列（START → 同 epoch 拒 → END 成功 → 已 END 拒 → 新 epoch 可启）
+```
+
+### 7. 清理
+
+仅清理测试进程：bridge（UAV1/GCS_A）、executor、backend、MAVROS、roscore 11312；保留操作员的 11300 仿真（gazebo + 4 架 px4）。用 PID 文件或精确 PID 停止，避免 `pkill -f` 匹配到自身命令行。
 
 ## OFFBOARD MOVE_TO 主链路
 
