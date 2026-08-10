@@ -618,3 +618,32 @@ kill <uav1_bridge_pid>         # 本会话为 394038
 - 全程未触发也未验证 PX4 自身 datalink/offboard/RC loss failsafe（按本轮分工，不进行 PX4 failsafe 警告类验证）；PX4 版本确认为 `v1.13.2-dirty (xtdrone/dev)`，其 failsafe 参数（`COM_DL_LOSS_T/NAV_DLL_ACT/NAV_RCL_ACT/COM_OBL_ACT/COM_OBL_RC_ACT/CBRK_FLIGHTTERM`）已从源码核对并留存，仅供现场实机门禁参考。
 - 仍不可声明：Phase 6 实机无桨门禁或实机上桨许可。软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前保持默认不自动 arm、不自动切 OFFBOARD。
 - 本轮未修改任何仓库代码；仅启动/停止测试进程并在测试后全清理（仅保留用户 11300 仿真）。
+
+---
+
+# EGO-Swarm P1 静态复核与单 Master 冒烟（2026-08-10 18:00）
+
+## 自动化回归
+
+| 范围 | 结果 |
+|---|---|
+| `catkin build swarm_uav_interfaces ego_planner_driver swarm_uav_executor tcp_to_ros` | 成功 |
+| `catkin run_tests swarm_uav_interfaces ego_planner_driver swarm_uav_executor tcp_to_ros` | 成功 |
+| `catkin_test_results --all build` | **74 tests, 0 errors, 0 failures, 0 skipped**（较交接基线 72 增 2，来自 FOLLOW_ROUTE 语义测试） |
+
+## 静态复核修复
+
+- **FOLLOW_ROUTE 语义（P1 leader-only）**：`build_goal` 现保留 leader_id；`validate_task_request` 对 `leader_id != uav_id` 拒绝为 `NOT_IMPLEMENTED`（P2 follower 语义显式前移）；driver 改为以 `waypoints` 判空而非 `leader_id`，消除语义反向耦合。
+- **HOLD fail-safe**：C++ 节点无 fresh local pose 时不再退回轨迹终点，改为 `steady_target_.reset()` 停止发布 setpoint，避免发布不安全 setpoint。
+- **Plan epoch**：以优化完成时刻为执行 epoch 并平移轨迹 t/duration，补偿优化耗时避免侵占执行时间轴。
+
+## 单 Master EGO 运行时冒烟（PASS）
+
+- 环境：`roscore(11311)` + `roslaunch ego_planner_driver ego_planner_driver.launch uav_id:=A01 exec_target:=UAV1`；冒烟脚本 `/tmp/ego_smoke2.py`（订阅 setpoint 回灌为 local_pose 模拟理想位控）。
+- **发现并修复命名空间 bug**：C++ 节点接口 topic 与身份参数原建在 private handle，落在 `/UAV1/ego_planner_driver/*`，与 Python 驱动期望的 `/UAV1/*` 不一致；修复为公开 handle + launch `<group ns>` 放身份参数（提交 `ec9ac63`）。
+- 结果：`states: [IDLE, EXECUTING, COMPLETED, HOLD]`，setpoint 79 帧，`SMOKE PASS`。
+
+## 边界
+
+- 双/三 Master reciprocal 与 PX4 SITL/MAVROS 回归因当前环境缺 PX4-Autopilot/px4 可执行文件无法执行，**P1 仍不可声明完成**。
+- 无残留 ROS 进程；测试后已全清理。
