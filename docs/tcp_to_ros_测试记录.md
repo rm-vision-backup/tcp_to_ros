@@ -647,3 +647,51 @@ kill <uav1_bridge_pid>         # 本会话为 394038
 
 - 双/三 Master reciprocal 与 PX4 SITL/MAVROS 回归因当前环境缺 PX4-Autopilot/px4 可执行文件无法执行，**P1 仍不可声明完成**。
 - 无残留 ROS 进程；测试后已全清理。
+
+# EGO-Swarm P1 多 Master/SITL 组合验证（2026-08-10 20:05）
+
+## 验证结论
+
+- 单 Master 双 ego reciprocal、双 Master reciprocal、三 Master reciprocal、PX4 SITL/MAVROS + SafetyLeaseWatchdog + ego driver 组合全部 PASS。
+- P1 未完成项中：PX4 SITL/MAVROS 回归、双/三 Master reciprocal、SafetyLeaseWatchdog 与 ego driver 组合回归、END gate MAVROS 条件、MotionGoal.waypoints 收窄、FAULT_EXIT/HOVER layer height 约束均已完成。
+- 修复真实 bug 2 个：`uav_executor_ego.launch` 的 `supported_commands` 用 `<param>` 传字符串（应为 `<rosparam>` 列表）导致 UNSUPPORTED_COMMAND；该 launch 缺公开命名空间身份参数（应 `/UAV1/uav_id`）导致 DRIVER_NOT_READY。
+- 本次未修改规划/交接文档新增完成声明；P1 是否可声明完成按用户确认的下一步（README/CONTEXT/测试记录收口）评估。
+
+## 验证步骤与证据
+
+### 1. 单 Master 双 ego reciprocal（11311，脚本 verification/ego_smoke/smoke_reciprocal.py）
+
+- 平行同飞（5,0,15）/（5,5,15）：两机互收 neighbor_intent（UAV1←A2、UAV2←A1），均 EXECUTING/HOLD。
+- 错位 3s：两机 EXECUTING→COMPLETED。
+- `RECIPROCAL SMOKE PASS`。
+
+### 2. 双 Master reciprocal（UAV1:11311 + UAV2:11312，经 swarm_topology_bridge 专用拓扑 topology_multimaster.yaml）
+
+- 两次运行分别验证 UAV1←A2×28 与 UAV2←A1（双向跨 Master intent 互达）。
+- relay：本机 /UAVx/trajectory_intent → /trajectory_intent（bridge 采集），邻居 /<nb>/trajectory_intent → /UAVx/neighbor_intent（C++ onNeighborIntent 输入）。
+
+### 3. 三 Master reciprocal（UAV1/2/3:11311/11312/11313 全连通）
+
+- UAV1←A3、UAV2←{A1,A3}、UAV3←A1，全部 EXECUTING，`CROSS-MASTER PASS`×3。
+- 验证了交接要求的三机错位/换位、全连通与绝对 stamp 转本机相对时轴（replan 成功）。
+
+### 4. PX4 SITL/MAVROS + SafetyLeaseWatchdog + ego driver 组合（单机 UAV1）
+
+- 仿真层：`multi_uav_sim_headless.launch`（新增，gui:=false）启动 4 架 PX4 SITL（iris_0..3，Onboard 端口 34580-34583）+ Gazebo 无头；MAVROS 150 baud UDP 对接 iris_0。
+- 机载层：`uav_offboard_ego.launch`（新增）MAVROS + `uav_executor_ego.launch`。
+- `combined_sitl_check.py`（verification/ego_smoke/）：
+  - LEASE START（ACTIVE）→ task MOVE_TO（ACCEPTED）→ ego IDLE→EXECUTING→COMPLETED→HOLD（setpoint 105 帧）→ RENEW → END（INACTIVE）。
+  - `COMBINED PASS`。
+- 第一次组合运行还复现了 watchdog 锁存：TTL 过期进入 EXPIRED_HOLD 后 RENEW/START/END 均被拒（LEASE_EPOCH_CONFLICT），唯一恢复路径是重启 executor——与 2026-08-10 mavros_position 路径结论一致，现于 ego driver 路径复现。
+
+### 5. 静态收口项
+
+- END gate：`EgoSwarmDriver` 新增 `mavros_state_topic` 可选配置；配置后 `can_end_safety_lease` 强制 MAVROS state 新鲜、connected、stable disarmed（镜像 MavrosPositionDriver）。默认配置下保持纯 ego 基线（fresh pose + 非 EXECUTING）。`executor_defaults.yaml` 与 `uav_executor_ego.launch` 暴露参数。新增 4 项单元测试（disconnected/armed/not-stable/stable），`test_ego_swarm_driver.py` 11/11 通过。
+- `MotionGoal.waypoints` 收窄为 `Tuple[Tuple[float,float,float,float], ...]`。
+- FAULT_EXIT/HOVER/FOLLOW_ROUTE layer height 约束：FAULT_EXIT z≈8m、HOVER 1..16m、FOLLOW_ROUTE waypoints z≈12m；新增 4 项 validation 测试。
+- 回归：`pytest src/swarm_uav_executor/test/` = 54 passed（1 项 rostest 需单独跑）；`rostest swarm_uav_executor uav_executor_rostest.test` = SUCCESS。
+
+### 6. 环境清理
+
+- 已清理 roscore/gzserver/px4/MAVROS/executor/ego/relay/bridge 全部进程；无残留。
+- 本阶段在 `verification/ego_smoke/`（工作空间顶层，不属任何 git 仓库）新增验证脚本：smoke_single_master.py、smoke_reciprocal.py、multimaster_relay.py、mm_check.py、combined_sitl_check.py、topology_multimaster.yaml、multimaster_bridge.launch、run_multimaster.sh、README.md。
