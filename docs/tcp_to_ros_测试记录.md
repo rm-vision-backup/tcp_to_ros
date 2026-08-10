@@ -695,3 +695,30 @@ kill <uav1_bridge_pid>         # 本会话为 394038
 
 - 已清理 roscore/gzserver/px4/MAVROS/executor/ego/relay/bridge 全部进程；无残留。
 - 本阶段在 `verification/ego_smoke/`（工作空间顶层，不属任何 git 仓库）新增验证脚本：smoke_single_master.py、smoke_reciprocal.py、multimaster_relay.py、mm_check.py、combined_sitl_check.py、topology_multimaster.yaml、multimaster_bridge.launch、run_multimaster.sh、README.md。
+
+# EGO 无前缀机载形态改造验证（2026-08-10 20:40）
+
+## 改造背景与目标
+
+用户要求：机载端 ego_planner_driver 本机**无 namespace 前缀**（与 MAVROS `/mavros/*` 一致），机间区分交给 swarm_topology_bridge 的源前缀（`/<邻居>/trajectory_intent`）。仿真与实机程序层面统一，仅切换 launch 即可。
+
+## 改动清单
+
+- `ego_planner_driver.launch`：删除节点 `ns`（全局运行）、`<group ns>` 身份参数改全局 `/uav_id`/`/exec_target`。
+- `uav_executor_ego.launch`：删除 `ego_namespace` 与节点 `ns`、删除 `trajectory_intent` remap、身份参数全局化、`ego_swarm/namespace=""`。
+- `uav_offboard_ego.launch`：移除 `ego_namespace` 传参。
+- `executor_defaults.yaml`：`ego_swarm.namespace=""`。
+- `EgoSwarmDriver`：默认 `namespace=""`；空 namespace 直接发布 `/setpoint`、`/exec_state` 等；非空保留兼容（旧单 Master 多 UAV）。`_node_ready` 在空 namespace 时检查全局 `/uav_id`。
+- 验证脚本：`smoke_single_master.py`/`combined_sitl_check.py` NS=""；`multimaster_relay.py` 简化为仅桥接邻居→本机 `/neighbor_intent`（本机 `/trajectory_intent` 由 bridge 直接采集，不再搬运）；`mm_check.py` 无前缀；`run_multimaster.sh` relay 参数更新。
+
+## 验证结果（全部 PASS）
+
+1. 单元测试：`test_ego_swarm_driver.py` + `test_validation.py` = 23 passed。
+2. 单 Master 无前缀冒烟：话题确认 `/exec_state`、`/setpoint`、`/trajectory_intent`、`/neighbor_intent` 等无前缀；`/uav_id=A01` 全局参数可发现；IDLE→EXECUTING→COMPLETED→HOLD，setpoint 81 帧，SMOKE PASS。
+3. 双 Master 无前缀 reciprocal（11311/11312 + bridge）：双向互达（UAV1←A2、UAV2←A1），CROSS-MASTER PASS×2。
+4. PX4 SITL 无前缀组合（MAVROS connected=True/armed=False + ego + lease）：LEASE START(RENEW/END 全 ACTIVE/INACTIVE)，task MOVE_TO ACCEPTED，ego IDLE→EXECUTING→COMPLETED→HOLD，setpoint 106，COMBINED PASS。
+   - END gate 现在启用 `mavros_state_topic=/mavros/state`（MAVROS 新鲜/connected/stable disarmed 全部满足），lease END 通过。
+
+## 环境清理
+
+- 已清理 roscore/gzserver/px4/MAVROS/executor/ego/relay/bridge 全部进程；无残留。
