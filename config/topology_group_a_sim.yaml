@@ -35,6 +35,7 @@ topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
   - {name: uav_task_state, type: swarm_uav_interfaces/UavTaskState, max_freq: 0}
   - {name: mavros/state, type: mavros_msgs/State, max_freq: 0}
+  - {name: trajectory_intent, type: swarm_uav_interfaces/UavTrajectoryIntent, max_freq: 0}
 
 max_freq: 0
 base_port: 4200
@@ -43,9 +44,9 @@ base_port: 4200
 # 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间不需要互收状态。
 topology:
   GCS_A: [UAV1, UAV2, UAV3]
-  UAV1: []
-  UAV2: []
-  UAV3: []
+  UAV1: [UAV2, UAV3]
+  UAV2: [UAV1, UAV3]
+  UAV3: [UAV1, UAV2]
 
 # 通用 Service 代理 (所有节点加载同一份完整列表, 按 target 判断角色):
 #   - name 为跨机唯一 Service 名
