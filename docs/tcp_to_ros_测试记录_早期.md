@@ -1,4 +1,12 @@
-# tcp_to_ros 测试记录
+# tcp_to_ros 测试记录（早期）
+
+> **本文为最早的测试记录归档（Phase 1-5 mock / SITL 基线证据），已冻结，不再更新。**
+> 后续测试证据按期归档在以下文件（按时间顺序）：
+> - `docs/test_record_26081021.md`（场景 1/2/2+ 操作手册 + 历史测试结果）
+> - `docs/test_record_26081115.md`（四种动作命令实现验证）
+> - `docs/test_record_26081123.md`（场景 3 无头 15 机多 Master 端到端测试报告）
+> 文件索引见 `plans/README.md`。
+
 
 ## 文档说明
 
@@ -301,9 +309,9 @@ assignment:
 
 ## 关联文档
 
-- 测试步骤：`tcp_to_ros_测试步骤.md`
+- 测试步骤：`test_record_26081021.md`（场景 1/2/2+ 操作手册）
 - 工程过程：`tcp_to_ros_工程过程.md`
-- 后续开发计划：`tcp_to_ros_后续开发计划.md`
+- Phase 编号/设计规约/文档索引：`plans/README.md`
 
 ---
 

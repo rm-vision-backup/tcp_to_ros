@@ -229,158 +229,15 @@ python3 references/runtime/task_test.py --backend tcp --group A --task hold-end 
 
 ---
 
-## 场景 3：真实 MAVROS + PX4 SITL（图形界面，多 Master 隔离仿真端点到端）
+## 场景 3：真实 MAVROS + PX4 SITL（多 Master 隔离仿真端到端）
 
-> 目的：真实 MAVROS 连接 PX4 SITL，验证「runtime → TCP → GCS_A → bridge → executor → MAVROS → PX4」全链路，无人机实际响应 setpoint。
-> 采用「**仿真层 + 机载层 + 地面站层**」两层结构，与 `safe_valley_exp/README.md` 的多 Master 隔离仿真一致。
-
-### 3.1 启动仿真界面（终端 A，仿真 Master：11300）
-
-图形界面（Gazebo 窗口弹出 4 架 iris）：
-
-```bash
-cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-source /home/ub20tg/PX4_Firmware/Tools/setup_gazebo.bash /home/ub20tg/PX4_Firmware /home/ub20tg/PX4_Firmware/build/px4_sitl_default
-export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:/home/ub20tg/PX4_Firmware:/home/ub20tg/PX4_Firmware/Tools/sitl_gazebo"
-export ROS_MASTER_URI=http://localhost:11300
-export ROS_HOSTNAME=localhost
-export GAZEBO_MASTER_URI=http://localhost:11345
-roslaunch safe_valley_exp multi_uav_sim.launch
-```
-
-若你的环境无法弹出 GUI 窗口，改用无头模式（不弹窗口，仍启动 4 架 PX4 SITL）：
-
-```bash
-roslaunch safe_valley_exp multi_uav_sim_headless.launch
-```
-
-预期：
-- Gazebo 窗口（图形模式）出现 4 架 iris（iris_0..iris_3），或启动日志出现 4 次 `Simulator connected on TCP port 4560/4561/4562/4563`；
-- 4 架 PX4 SITL 各自监听 `udp 34580/34581/34582/34583`（对应 `tgt_system 1..4`）。
-
-### 3.2 启动 UAV1 机载层（终端 B1，机载 Master：11311）
-
-```bash
-cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11311
-export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV1 uav_id:=UAV1 tgt_system:=1
-```
-
-预期：
-- MAVROS 通过 `udp://:24540@localhost:34580` 连接 iris_0；`/mavros/state` 为 `connected: True`、`armed: False`；
-- executor 注册 `/UAV1/uav_task`、`/UAV1/uav_hold`、`/UAV1/uav_safety_lease` Service；
-- ego 节点发布 `/exec_state`（IDLE）、`/setpoint`、`/trajectory_intent`（本机无前缀话题）。
-
-### 3.3 启动 UAV2 机载层（终端 B2，机载 Master：11312）
-
-```bash
-cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11312
-export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV2 uav_id:=UAV2 tgt_system:=2
-```
-
-预期：与 3.2 相同，但对接 iris_1（端口 24541/34581），话题注册在 `/UAV2/*`。
-
-### 3.4（可选）启动 UAV3 机载层（终端 B3，机载 Master：11313）
-
-```bash
-export ROS_MASTER_URI=http://localhost:11313
-export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV3 uav_id:=UAV3 tgt_system:=3
-```
-
-### 3.4b（可选）启动 UAV4 机载层（终端 B4，机载 Master：11314）
-
-```bash
-export ROS_MASTER_URI=http://localhost:11314
-export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV4 uav_id:=UAV4 tgt_system:=4
-```
-
-### 3.5 启动 GCS_A 地面站（终端 C，地面站 Master：11310）
-
-```bash
-cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11310
-export ROS_HOSTNAME=localhost
-# 1) GCS_A bridge（只跑 bridge，不跑 mock executor）
-roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=false &
-# 2) GCS_A 分发后端
-roslaunch tcp_to_ros gcs_a_backend.launch &
-# 3) TCP Server（监听 39001）
-rosrun tcp_to_ros tcp_server_node.py _host:=0.0.0.0 _port:=39001 _action_name:=/group_a/execute_task _state_topic:=/group_a/group_task_state _emergency_hold_service:=/group_a/emergency_hold
-```
-
-预期：
-- GCS_A 能订阅到来自 UAV1/UAV2/UAV3 的 `/UAV{n}/mavros/state`（经 bridge 转发）；
-- GCS_A 注册每个 UAV 的 `/UAV{n}/uav_task|uav_hold|uav_safety_lease` 跨机 Service 代理；
-- `tcp_server_node` 监听 39001。
-
-### 3.6 观察链路健康（终端 C 另开窗口）
-
-```bash
-source /opt/ros/noetic/setup.bash
-source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11310
-export ROS_HOSTNAME=localhost
-rostopic echo /UAV1/mavros/state
-```
-
-预期：`connected: True`、`armed: False`；说明 GCS_A 已通过 bridge 连通 UAV1 的 MAVROS 状态。
-
-### 3.7 通过 4 机模拟程序发送整组批次（终端 D）
-
-> 注：`references/runtime` 的 `task_test.py --backend tcp` 发送 15 机整组批次（prepare 含 A01..A15），会分派到不存在的 UAV5..UAV15；4 机场景改用模拟程序 `tcp_4sim_test_client.py` 只发 A01..A03（可加 `--include-a04` 含 A04）。
-
-```bash
-cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-# 单步发送 prepare（MOVE_TO A01..A03）
-python3 src/tcp_to_ros/scripts/tcp_4sim_test_client.py --host 127.0.0.1 --port 39001 --tasks prepare
-# 或按需选批次：--tasks prepare,coverage-segment-1,hold-end
-# （若启动 UAV4 机载层，加 --include-a04）
-```
-
-预期：
-- 模拟程序连接 TCP 39001，逐批次等待 `ACCEPTED → COMPLETED`，输出 `[PASS] prepare MOVE_TO COMPLETED uavs=['A01','A02','A03']`；
-- GCS_A 拆分为单机任务并通过跨机 Service 下发；
-- UAV1 executor 接收任务并调用 MAVROS 持续发布 setpoint；
-- 可在机载 Master 观察 `/exec_state` 由 IDLE → EXECUTING；MAVROS 收到 setpoint 后 PX4 SITL（Gazebo 中）开始响应；
-- 若 UAV 不在 OFFBOARD 且由外部操作员 arm/切 OFFBOARD，则任务可能在本地验证层被拒绝并走安全路径，此时请先按 3.8 完成 arm/OFFBOARD。
-
-### 3.8（可选）操作员手动 arm + OFFBOARD（终端 B1 或 QGC）
-
-依据安全基线，程序默认不自动 arm、不自动切 OFFBOARD；如需无人机实际飞行，由操作员在 QGC 或 MAVROS 手动完成：
-
-```bash
-# 示例（MAVROS，操作员手动；禁止自动执行）
-# rosservice call /mavros/cmd/arming "value: true"
-# rosservice call /mavros/set_mode "custom_mode: 'OFFBOARD'"
-```
-
-预期：PX4 进入 OFFBOARD 后，无人机在 Gazebo 中按 setpoint 移动；任务到达后 `exec_state` → `COMPLETED`。
-
-### 3.9 观察安全租约与 END
-
-在 3.7 任务完成后（机载 Master）：
-
-```bash
-export ROS_MASTER_URI=http://localhost:11311
-rosservice call /UAV1/uav_safety_lease "...operation: 'END'..."   # 由地面站/脚本按接口发起
-```
-
-预期：飞行安全租约正常解除 `INACTIVE`；若在任务执行中租约过期，Watchdog 触发本地 HOLD（`/exec_state` 出现 HOLD）。
+> **已迁移**：场景 3 的完整操作步骤与测试结果迁移至
+> `docs/test_record_26081123.md`（场景 3 无头 15 机多 Master 隔离仿真端到端测试报告，
+> 2026-08-11 23:58 生成），**以该文件为准**。
+>
+> 迁移原因：原场景 3 描述的是 4 机图形界面、逐个启动机载层的方式；
+> 已被 15 机无头模式 + `multi_uav_ego_15sim.launch gui:=false` + `startup_offboard_ego.sh`
+> 批量启动取代。
 
 ---
 
@@ -393,17 +250,18 @@ pkill -f "roslaunch tcp_to_ros|roslaunch safe_valley_exp|roslaunch swarm|rosrun 
 
 ---
 
-## 端口与命名速查
+## 端口与命名速查（场景 1/2 单 Master 或双 Master mock）
 
-| 对象 | Master 端口 | ZMQ 偏移 | fcu 端口 | 机载服务 |
-|---|---|---|---|---|
-| 仿真层 Gazebo | 11300 | - | - | - |
-| UAV1 (iris_0) | 11311 | 100 | udp://:24540@localhost:34580 | /UAV1/* |
-| UAV2 (iris_1) | 11312 | 200 | udp://:24541@localhost:34581 | /UAV2/* |
-| UAV3 (iris_2) | 11313 | 300 | udp://:24542@localhost:34582 | /UAV3/* |
-| UAV4 (iris_3) | 11314 | 400 | udp://:24543@localhost:34583 | /UAV4/* |
-| GCS_A 地面站 | 11310 | 0 | - | /group_a/* + TCP 39001 |
+> 场景 3（真实 MAVROS + PX4 SITL 多 Master）的完整 15 机端口表见 `docs/test_record_26081123.md` §1.2。
+
+| 对象 | Master 端口 | ZMQ 偏移 | 机载服务 |
+|---|---|---|---|
+| GCS_A 地面站 | 11311（单 Master）/11310（多 Master 时） | 0 | /group_a/* + TCP 39001 |
+| UAV1..UAVn（mock，单 Master） | 同 GCS_A | n*100 | /UAV{n}/* |
+
+> 场景 1/2 使用单 Master（默认 11311），UAV mock 执行器与 GCS_A 同 Master 部署；
+> 多 Master 形态的逐机端口分配以 `docs/test_record_26081123.md` §1.2 为准。
 
 ---
 
-*本文件用于端到端联调验证；开发与验证历史见 `docs/tcp_to_ros_测试记录.md`。*
+*本文件用于端到端联调验证；开发与验证历史见 `docs/tcp_to_ros_测试记录_早期.md` 与 `docs/test_record_2608xxxx.md` 系列。*
