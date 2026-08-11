@@ -268,7 +268,7 @@ source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 export ROS_MASTER_URI=http://localhost:11311
 export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV1 uav_id:=A1 tgt_system:=1
+roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV1 uav_id:=UAV1 tgt_system:=1
 ```
 
 预期：
@@ -284,7 +284,7 @@ source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 export ROS_MASTER_URI=http://localhost:11312
 export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV2 uav_id:=A2 tgt_system:=2
+roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV2 uav_id:=UAV2 tgt_system:=2
 ```
 
 预期：与 3.2 相同，但对接 iris_1（端口 24541/34581），话题注册在 `/UAV2/*`。
@@ -294,16 +294,24 @@ roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV2 uav_id:=A2 tgt_
 ```bash
 export ROS_MASTER_URI=http://localhost:11313
 export ROS_HOSTNAME=localhost
-roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV3 uav_id:=A3 tgt_system:=3
+roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV3 uav_id:=UAV3 tgt_system:=3
 ```
 
-### 3.5 启动 GCS_A 地面站（终端 C，地面站 Master：11314）
+### 3.4b（可选）启动 UAV4 机载层（终端 B4，机载 Master：11314）
+
+```bash
+export ROS_MASTER_URI=http://localhost:11314
+export ROS_HOSTNAME=localhost
+roslaunch safe_valley_exp uav_offboard_ego.launch uav_name:=UAV4 uav_id:=UAV4 tgt_system:=4
+```
+
+### 3.5 启动 GCS_A 地面站（终端 C，地面站 Master：11310）
 
 ```bash
 cd /home/ub20tg/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11314
+export ROS_MASTER_URI=http://localhost:11310
 export ROS_HOSTNAME=localhost
 # 1) GCS_A bridge（只跑 bridge，不跑 mock executor）
 roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=false &
@@ -323,27 +331,33 @@ rosrun tcp_to_ros tcp_server_node.py _host:=0.0.0.0 _port:=39001 _action_name:=/
 ```bash
 source /opt/ros/noetic/setup.bash
 source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
-export ROS_MASTER_URI=http://localhost:11314
+export ROS_MASTER_URI=http://localhost:11310
 export ROS_HOSTNAME=localhost
 rostopic echo /UAV1/mavros/state
 ```
 
 预期：`connected: True`、`armed: False`；说明 GCS_A 已通过 bridge 连通 UAV1 的 MAVROS 状态。
 
-### 3.7 通过 runtime 发送 MOVE_TO 整组批次（终端 D）
+### 3.7 通过 4 机模拟程序发送整组批次（终端 D）
+
+> 注：`references/runtime` 的 `task_test.py --backend tcp` 发送 15 机整组批次（prepare 含 A01..A15），会分派到不存在的 UAV5..UAV15；4 机场景改用模拟程序 `tcp_4sim_test_client.py` 只发 A01..A03（可加 `--include-a04` 含 A04）。
 
 ```bash
 cd /home/ub20tg/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
-python3 references/runtime/task_test.py --backend tcp --group A --task coverage-segment-1 --tcp-host 127.0.0.1 --tcp-port 39001
+# 单步发送 prepare（MOVE_TO A01..A03）
+python3 src/tcp_to_ros/scripts/tcp_4sim_test_client.py --host 127.0.0.1 --port 39001 --tasks prepare
+# 或按需选批次：--tasks prepare,coverage-segment-1,hold-end
+# （若启动 UAV4 机载层，加 --include-a04）
 ```
 
 预期：
+- 模拟程序连接 TCP 39001，逐批次等待 `ACCEPTED → COMPLETED`，输出 `[PASS] prepare MOVE_TO COMPLETED uavs=['A01','A02','A03']`；
 - GCS_A 拆分为单机任务并通过跨机 Service 下发；
 - UAV1 executor 接收任务并调用 MAVROS 持续发布 setpoint；
 - 可在机载 Master 观察 `/exec_state` 由 IDLE → EXECUTING；MAVROS 收到 setpoint 后 PX4 SITL（Gazebo 中）开始响应；
-- runtime 返回整组 `COMPLETED`/`SUCCESS`（若 UAV 不在 OFFBOARD 且由外部操作员 arm/切 OFFBOARD，则任务可能在本地验证层被拒绝并走安全路径，此时请先按 3.8 完成 arm/OFFBOARD）。
+- 若 UAV 不在 OFFBOARD 且由外部操作员 arm/切 OFFBOARD，则任务可能在本地验证层被拒绝并走安全路径，此时请先按 3.8 完成 arm/OFFBOARD。
 
 ### 3.8（可选）操作员手动 arm + OFFBOARD（终端 B1 或 QGC）
 
@@ -387,7 +401,8 @@ pkill -f "roslaunch tcp_to_ros|roslaunch safe_valley_exp|roslaunch swarm|rosrun 
 | UAV1 (iris_0) | 11311 | 100 | udp://:24540@localhost:34580 | /UAV1/* |
 | UAV2 (iris_1) | 11312 | 200 | udp://:24541@localhost:34581 | /UAV2/* |
 | UAV3 (iris_2) | 11313 | 300 | udp://:24542@localhost:34582 | /UAV3/* |
-| GCS_A 地面站 | 11314 | 0 | - | /group_a/* + TCP 39001 |
+| UAV4 (iris_3) | 11314 | 400 | udp://:24543@localhost:34583 | /UAV4/* |
+| GCS_A 地面站 | 11310 | 0 | - | /group_a/* + TCP 39001 |
 
 ---
 

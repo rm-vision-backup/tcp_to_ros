@@ -6,8 +6,9 @@
 #   export ROS_MASTER_URI=http://localhost:11311
 #   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV1
 #   ...
-#   export ROS_MASTER_URI=http://localhost:11314
+#   export ROS_MASTER_URI=http://localhost:11310
 #   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A
+#   （机载 UAV4 使用 11314，与 GCS_A 11310 分离；端口规划见下方 port_offset）
 #
 # 端口规划:
 #   - Topic PUB:   base_port + topic_idx + port_offset
