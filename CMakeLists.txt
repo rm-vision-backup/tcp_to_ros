@@ -4,6 +4,7 @@ project(tcp_to_ros)
 find_package(catkin REQUIRED COMPONENTS
   actionlib
   actionlib_msgs
+  geographic_msgs
   message_generation
   mavros_msgs
   rospy
@@ -54,6 +55,7 @@ catkin_install_python(PROGRAMS
   scripts/task_event_injector.py
   scripts/gcs_a_backend_node.py
   scripts/mock_mavros_state_node.py
+  scripts/gp_origin_publisher.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -21,4 +21,12 @@
     <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
     <param name="formation_offsets_file" value="$(arg formation_offsets_file)" />
   </node>
+
+  <!-- 全局原点发布器：由 GCS_A 统一定义 GPS 原点并周期下发（1Hz），
+       所有无人机起飞前经 bridge 收到后设置 /mavros/global_position/set_gp_origin -->
+  <node pkg="tcp_to_ros" type="gp_origin_publisher.py" name="gp_origin_publisher" output="screen">
+    <param name="origin_lat" value="28.2" />
+    <param name="origin_lon" value="112.9" />
+    <param name="origin_alt" value="50.0" />
+  </node>
 </launch>
