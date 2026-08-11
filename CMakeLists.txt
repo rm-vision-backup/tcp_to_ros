@@ -48,6 +48,7 @@ catkin_package(
 )
 
 catkin_install_python(PROGRAMS
+  scripts/tcp_4sim_test_client.py
   scripts/tcp_server_node.py
   scripts/mock_backend_node.py
   scripts/task_event_injector.py
