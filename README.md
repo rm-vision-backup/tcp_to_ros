@@ -58,13 +58,19 @@ catkin build tcp_to_ros
 source /home/ub20tg/catkin_swarm6-2/devel/setup.bash
 ```
 
-若默认 `build`/`devel`/`logs` 被旧 `catkin_make` 产物占用，先删除并重新初始化 `src` 后编译。若无法写默认 `~/.ros`，改用工作区目录：
+若默认 `build`/`devel`/`logs` 被旧 `catkin_make` 产物占用，先删除并重新初始化 `src` 后编译。
+
+### 环境变量（ROS 日志重定向）
+
+为避免 ROS 运行日志散落在 `~/.ros/log`，本工作空间统一将运行日志重定向到 `.ros_home/`，启动任何 ROS 节点前请先执行：
 
 ```bash
 export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
 export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
 mkdir -p "$ROS_LOG_DIR"
 ```
+
+确保当前工作空间所有 ROS 运行日志均写入 `.ros_home/log`。
 
 ## 运行方式
 
