@@ -35,6 +35,8 @@ topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
   - {name: uav_task_state, type: swarm_uav_interfaces/UavTaskState, max_freq: 0}
   - {name: mavros/state, type: mavros_msgs/State, max_freq: 0}
+  # leader 位姿桥接: FOLLOW_ROUTE follower 订阅 /<leader>/mavros/local_position/odom
+  - {name: mavros/local_position/odom, type: nav_msgs/Odometry, max_freq: 0}
   - {name: trajectory_intent, type: swarm_uav_interfaces/UavTrajectoryIntent, max_freq: 0}
 
 max_freq: 0
