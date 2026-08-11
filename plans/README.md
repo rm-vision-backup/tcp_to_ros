@@ -73,7 +73,7 @@ GCS_A 必须：
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前不得上桨。
 - 无 RC 的 PX4 SITL 需设 `COM_RCL_EXCEPT=4` + `NAV_RCL_ACT=0`，并**先切 OFFBOARD 再 arm**。
 
-## 冻结实施计划（历史设计文档，当前状态见本 README）
+## 实施计划（历史 + 进行中）
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
@@ -81,8 +81,13 @@ GCS_A 必须：
 | `implementation_plan_26080900.md` | Phase 5：跨 Master 链路健康 + 飞行安全租约 + 故障注入 | 已实施 |
 | `implementation_plan_26081003.md` | P1：ego_planner_driver 轨迹内核 + 机间避碰集成 | 已实施 |
 | `implementation_plan_26081023.md` | 四种动作命令（MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER）补齐 | 已实施 |
+| `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **计划中（待实施）** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
+>
+> `implementation_plan_26081202.md` 为**进行中计划**：修复场景 3 测试暴露的 ego 状态机缺陷
+> （IDLE 不发布 setpoint、COMPLETED/HOLD 不复位 IDLE、多机坐标系不一致）。
+> arm+takeoff+OFFBOARD 自动化方案已调研见该计划附录 A（**本次不实现**）。
 
 ## 开发里程碑
 
@@ -95,15 +100,18 @@ GCS_A 必须：
 | 5 | 跨 Master 通信安全闭环（mock 断链 2026-08-09；真实 MAVROS/PX4 租约断链 + 安全 END 2026-08-10） | `docs/tcp_to_ros_测试记录_早期.md` |
 | 5 | 四种动作命令实现 + 场景 2+ 15 mock 验收（2026-08-11 15:00） | `docs/test_record_26081115.md` |
 | 5 | 场景 3 无头 15 机多 Master 端到端（2026-08-11 23:58） | `docs/test_record_26081123.md` |
+| 5 | ego_planner_driver 状态机修复（进行中） | `plans/implementation_plan_26081202.md` |
 | 6 | 实机联调（不上桨 → 上桨） | 未执行 |
 
 ## 当前状态（实时）
 
 - **已落地**：Phase 1-5；四种动作命令已在机载执行层实现（mock 与单元级验证通过）。
-- **未完成**：Phase 6 实机联调；ego_planner_driver 在真实 PX4 下的执行稳定性
-  （场景 3 六批次应答仅 5-11/12 机成功，根因是 `/exec_state` 状态机卡 HOLD 不复位 IDLE，
-  详见 `docs/test_record_26081123.md`）。
-- **已知问题**：`--hold` 起飞脚本与 ego driver 抢占 `/mavros/setpoint_position/local`；
+- **进行中**：`ego_planner_driver` 状态机修复（计划 `implementation_plan_26081202.md`）：
+  IDLE 持续 30Hz 发布 setpoint（每秒刷新 hover 目标）、COMPLETED/HOLD 后 2s 自动回 IDLE、
+  GCS_A 全局原点统一（`set_gp_origin` 周期下发）。修复目标：场景 3 六批次全绿。
+- **未完成**：Phase 6 实机联调；ego_planner_driver 在真实 PX4 下的执行稳定性尚未修复验证。
+- **已知问题（测试流程）**：`--hold` 保活脚本与 ego driver 抢占 `/mavros/setpoint_position/local`
+  （修复方向：移除保活脚本，改由 ego driver IDLE 持续发布 setpoint）；
   `gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后才可通过 `roslaunch tcp_to_ros` 找到。
 
 ## 文档索引
@@ -111,7 +119,7 @@ GCS_A 必须：
 | 路径 | 内容 |
 |---|---|
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、里程碑、当前状态 |
-| `plans/implementation_plan_*.md` | 冻结实施计划（历史） |
+| `plans/implementation_plan_*.md` | 实施计划（历史冻结 + 进行中） |
 | `CONTEXT.md` | 领域词汇表 |
 | `docs/tcp_to_ros_工程过程.md` | 开发日志（含各阶段 bug 修复记录） |
 | `docs/tcp_to_ros_测试记录_早期.md` | 早期 mock 闭环测试证据（已冻结，不再更新） |
