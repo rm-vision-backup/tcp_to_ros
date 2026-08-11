@@ -92,7 +92,7 @@ class SafetyLeaseCoordinator:
         def worker(uav_id, target):
             remaining=max(0.0,deadline-self.clock())
             request=UavSafetyLeaseRequest("1.0",operation,session.mission_id,session.epoch,
-                session.sequences[uav_id],self.ttl_s if operation!="END" else 0.0,uav_id,target,operation.lower())
+                session.sequences[uav_id],self.ttl_s if operation!="END" else 0.0,target,target,operation.lower())  # uav_id=exec_target UAVn
             try:
                 response=self.call(target,request,min(self.call_timeout_s,remaining))
                 if not response.accepted: raise RuntimeError("%s: %s"%(response.error_code,response.message))

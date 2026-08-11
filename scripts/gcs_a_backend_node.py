@@ -442,6 +442,17 @@ class GcsABackendNode:
             with self._active_lock:
                 if self._active is state:
                     self._active = None
+            # 释放 safety-lease 会话：尽力补发 END；即使 END 对端超时，
+            # 也强制清空 GCS_A 侧会话（机载 watchdog 会按 TTL 自愈过期），
+            # 避免残留 SESSION_ACTIVE/EPOCH 阻塞后续批次。
+            try:
+                end_deadline = time.monotonic() + self.confirm_deadline_s
+                self.lease_coordinator.end_session(end_deadline)
+            except Exception:
+                pass
+            finally:
+                with self.lease_coordinator._lock:
+                    self.lease_coordinator._session = None
 
     def _run_goal(self, goal, state: GroupState) -> None:
         confirm_results = self._confirm_participants(goal, state)

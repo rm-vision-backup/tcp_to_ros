@@ -1,21 +1,18 @@
-# Group A 多 Master 仿真拓扑 (GCS_A + UAV1..UAV3)
+# Group A 多 Master 仿真拓扑 (GCS_A + UAV1..UAV15)
 # 属于 tcp_to_ros 地面站主功能包的联调配置：GCS_A 侧与 UAV* 机载侧
 # 都通过通用包 swarm_topology_bridge 的 bridge_node 加载本配置。
 #
 # 启动方式 (每个 ROS Master 一个终端):
 #   export ROS_MASTER_URI=http://localhost:11311
 #   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV1
-#   export ROS_MASTER_URI=http://localhost:11312
-#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV2
-#   export ROS_MASTER_URI=http://localhost:11313
-#   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=UAV3
+#   ...
 #   export ROS_MASTER_URI=http://localhost:11314
 #   roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A
 #
 # 端口规划:
 #   - Topic PUB:   base_port + topic_idx + port_offset
 #   - Service ROUTER: service_base_port + port_offset
-#   GCS_A: port_offset=0,  UAV1: port_offset=100, UAV2: port_offset=200, UAV3: port_offset=300
+#   GCS_A: port_offset=0,  UAV1: port_offset=100, UAV2: port_offset=200, ... UAV15: port_offset=1500
 #
 # 实机部署: 各 UAV 使用物理 IP 且 port_offset 全为 0。
 #
@@ -31,6 +28,17 @@ uavs:
   - {name: UAV2, ip: 127.0.0.1, port_offset: 200}
   - {name: UAV3, ip: 127.0.0.1, port_offset: 300}
   - {name: UAV4, ip: 127.0.0.1, port_offset: 400}
+  - {name: UAV5, ip: 127.0.0.1, port_offset: 500}
+  - {name: UAV6, ip: 127.0.0.1, port_offset: 600}
+  - {name: UAV7, ip: 127.0.0.1, port_offset: 700}
+  - {name: UAV8, ip: 127.0.0.1, port_offset: 800}
+  - {name: UAV9, ip: 127.0.0.1, port_offset: 900}
+  - {name: UAV10, ip: 127.0.0.1, port_offset: 1000}
+  - {name: UAV11, ip: 127.0.0.1, port_offset: 1100}
+  - {name: UAV12, ip: 127.0.0.1, port_offset: 1200}
+  - {name: UAV13, ip: 127.0.0.1, port_offset: 1300}
+  - {name: UAV14, ip: 127.0.0.1, port_offset: 1400}
+  - {name: UAV15, ip: 127.0.0.1, port_offset: 1500}
 
 topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
@@ -44,13 +52,25 @@ max_freq: 0
 base_port: 4200
 
 # Topic 桥拓扑: topology[my_name] 表示本机接收这些源的状态 Topic。
-# 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间不需要互收状态。
+# 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间仅需要 leader 位姿桥接 (FOLLOW_ROUTE),
+# 为保证 leader/follower 组在所有批次中可达, 每架 UAV 订阅其余全部 UAV 的 odom。
 topology:
-  GCS_A: [UAV1, UAV2, UAV3, UAV4]
-  UAV1: [UAV2, UAV3, UAV4]
-  UAV2: [UAV1, UAV3, UAV4]
-  UAV3: [UAV1, UAV2, UAV4]
-  UAV4: [UAV1, UAV2, UAV3]
+  GCS_A: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV1: [UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV2: [UAV1, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV3: [UAV1, UAV2, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV4: [UAV1, UAV2, UAV3, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV5: [UAV1, UAV2, UAV3, UAV4, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV6: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV7: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV8: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV9: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV10: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV11, UAV12, UAV13, UAV14, UAV15]
+  UAV11: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV12, UAV13, UAV14, UAV15]
+  UAV12: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV13, UAV14, UAV15]
+  UAV13: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV14, UAV15]
+  UAV14: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV15]
+  UAV15: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8, UAV9, UAV10, UAV11, UAV12, UAV13, UAV14]
 
 # 通用 Service 代理 (所有节点加载同一份完整列表, 按 target 判断角色):
 #   - name 为跨机唯一 Service 名
@@ -70,5 +90,38 @@ services:
   - {name: /UAV4/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV4}
   - {name: /UAV4/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV4}
   - {name: /UAV4/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV4}
+  - {name: /UAV5/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV5}
+  - {name: /UAV5/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV5}
+  - {name: /UAV5/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV5}
+  - {name: /UAV6/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV6}
+  - {name: /UAV6/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV6}
+  - {name: /UAV6/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV6}
+  - {name: /UAV7/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV7}
+  - {name: /UAV7/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV7}
+  - {name: /UAV7/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV7}
+  - {name: /UAV8/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV8}
+  - {name: /UAV8/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV8}
+  - {name: /UAV8/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV8}
+  - {name: /UAV9/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV9}
+  - {name: /UAV9/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV9}
+  - {name: /UAV9/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV9}
+  - {name: /UAV10/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV10}
+  - {name: /UAV10/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV10}
+  - {name: /UAV10/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV10}
+  - {name: /UAV11/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV11}
+  - {name: /UAV11/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV11}
+  - {name: /UAV11/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV11}
+  - {name: /UAV12/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV12}
+  - {name: /UAV12/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV12}
+  - {name: /UAV12/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV12}
+  - {name: /UAV13/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV13}
+  - {name: /UAV13/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV13}
+  - {name: /UAV13/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV13}
+  - {name: /UAV14/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV14}
+  - {name: /UAV14/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV14}
+  - {name: /UAV14/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV14}
+  - {name: /UAV15/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV15}
+  - {name: /UAV15/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV15}
+  - {name: /UAV15/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV15}
 
 service_base_port: 14000
