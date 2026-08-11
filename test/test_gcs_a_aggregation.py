@@ -81,7 +81,8 @@ class GcsAAggregationTest(unittest.TestCase):
         self.node.confirm_wait_s = 0.01
         self.node._call_service_with_timeout = fake_call
         self.node._safe_hold(self.state, "test")
-        self.assertEqual(["A01"], captured)
+        # 机载层统一使用执行层 UAVn 命名；A01 -> UAV1。
+        self.assertEqual(["UAV1"], captured)
         self.assertEqual(["A01"], self.state.held)
 
     def test_late_service_response_remains_timed_out(self):
@@ -180,7 +181,8 @@ class GcsAAggregationTest(unittest.TestCase):
         self.node.confirm_wait_s = 0.01
         self.node._call_service_with_timeout = fake_call
         self.node._safe_hold(self.state, "link lost", skip=self.state.link_lost_uavs)
-        self.assertEqual(["A02"], captured)
+        # 机载层统一使用执行层 UAVn 命名；A02 -> UAV2。
+        self.assertEqual(["UAV2"], captured)
 
 
 if __name__ == "__main__":

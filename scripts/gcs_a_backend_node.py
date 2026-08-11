@@ -151,6 +151,8 @@ class GcsABackendNode:
         )
 
         self.identity_map = IdentityMap.load(self.identity_map_path)
+        self.formation_offsets = self._load_formation_offsets(
+            rospy.get_param("~formation_offsets_file", ""))
         enabled = [(item.uav_id, item.exec_target) for item in self.identity_map.uavs if item.enabled]
         self.link_monitor = UavLinkMonitor(
             enabled,
@@ -214,6 +216,38 @@ class GcsABackendNode:
                              callback_args=(ident.uav_id, ident.exec_target), queue_size=10)
             rospy.loginfo("GCS_A subscribed to %s", mavros_topic)
 
+    @staticmethod
+    def _load_formation_offsets(path: str) -> Dict[str, Dict[str, tuple]]:
+        """Load GCS_A-side formation slot configuration.
+
+        Format (task-layer A-ids):
+          formation_offsets:
+            <leader_id>:
+              <follower_id>: [x, y, z]
+        """
+        if not path:
+            return {}
+        import yaml
+        try:
+            with open(path, "r", encoding="utf-8") as handle:
+                raw = yaml.safe_load(handle) or {}
+            table = raw.get("formation_offsets", {}) or {}
+            offsets: Dict[str, Dict[str, tuple]] = {}
+            for leader_id, followers in table.items():
+                leader = str(leader_id)
+                offsets.setdefault(leader, {})
+                if not isinstance(followers, dict):
+                    continue
+                for follower_id, value in followers.items():
+                    try:
+                        offsets[leader][str(follower_id)] = tuple(float(v) for v in value)
+                    except (TypeError, ValueError):
+                        rospy.logwarn("invalid formation_offset for %s/%s", leader, follower_id)
+            return offsets
+        except Exception as exc:  # noqa: BLE001
+            rospy.logwarn("failed to load formation_offsets from %s: %s", path, exc)
+            return {}
+
     def _on_mavros_state(self, msg, identity) -> None:
         self.link_monitor.record_state(identity[0], identity[1], bool(msg.connected))
 
@@ -272,6 +306,23 @@ class GcsABackendNode:
         if outcome.exception is not None: raise outcome.exception
         return outcome.response
 
+    def _translate_onboard_uav_id(self, msg: UavTaskState, state: GroupState):
+        """Map an onboard-reported exec-layer UAVn id back to the task-layer
+        A-id this group aggregates on. Returns a rewritten message or None."""
+        import copy as _copy
+        if msg.uav_id in state.exec_by_uav:
+            return msg
+        task_uav = None
+        for cand, exec_target in state.exec_by_uav.items():
+            if exec_target == (msg.exec_target or msg.uav_id):
+                task_uav = cand
+                break
+        if task_uav is None:
+            return None
+        rewritten = _copy.deepcopy(msg)
+        rewritten.uav_id = task_uav
+        return rewritten
+
     def _on_uav_state(self, msg: UavTaskState) -> None:
         with self._active_lock:
             state = self._active
@@ -279,6 +330,16 @@ class GcsABackendNode:
             return
         if msg.command_id != state.command_id or msg.mission_id != state.mission_id:
             return
+        translated = self._translate_onboard_uav_id(msg, state)
+        if translated is None:
+            rospy.logwarn_throttle(
+                5.0,
+                "ignored task state from non-participant or wrong identity: %s/%s",
+                msg.uav_id,
+                msg.exec_target,
+            )
+            return
+        msg = translated
         if (
             msg.uav_id not in state.exec_by_uav
             or msg.exec_target != state.exec_by_uav[msg.uav_id]
@@ -679,16 +740,25 @@ class GcsABackendNode:
             state.error_code = msg.error_code or state.error_code
 
     def _build_uav_task_request(self, goal, exec_target: str) -> UavTaskRequest:
+        import copy as _copy
         request = UavTaskRequest()
         request.protocol_version = PROTOCOL_VERSION
         request.mission_id = goal.mission_id
         request.group_id = str(getattr(goal, "group_id", "") or "GroupA")
         request.command_id = goal.command_id
-        request.uav_id = ""
+        # 机载 ROS 层统一使用执行层 UAVn 名称；任务层 A01..A15 的换算只在
+        # GCS_A 边界发生（identity_map 是唯一翻译点）。
+        request.uav_id = str(exec_target)
         request.exec_target = exec_target
         request.command = str(goal.command or "")
         request.timeout_s = float(goal.timeout_s)
-        request.leader_id = str(getattr(goal, "leader_id", "") or "")
+        leader_id = str(getattr(goal, "leader_id", "") or "")
+        if leader_id:
+            try:
+                leader_id = self.identity_map.identity(leader_id).exec_target
+            except KeyError:
+                leader_id = ""
+        request.leader_id = leader_id
 
         # Locate this UAV's assignment in the goal.
         assignment: Optional[TaskAssignment] = None
@@ -696,11 +766,31 @@ class GcsABackendNode:
             ident = self.identity_map.identity(item.uav_id)
             if ident.exec_target == exec_target:
                 assignment = item
-                request.uav_id = item.uav_id
                 break
         if assignment is None:
             raise ValueError(f"no assignment for exec_target {exec_target}")
-        request.assignment = assignment
+        # 不修改共享 goal：深拷贝后把 assignment.uav_id 改写为执行层名称，
+        # 使 executor 的 identity 校验（uav_id/exec_target）一致。
+        translated = _copy.deepcopy(assignment)
+        translated.uav_id = str(exec_target)
+        # 编队信息存 GCS_A：FOLLOW_ROUTE follower 若未随任务携带偏置，则按
+        # leader_id 查编队槽位配置并注入（任务层 A-id 作为 key）。
+        if str(getattr(goal, "command", "") or "") == "FOLLOW_ROUTE" and translated.formation_follow:
+            leader_task_id = str(getattr(goal, "leader_id", "") or "")
+            offset = None
+            if leader_task_id:
+                table = self.formation_offsets.get(leader_task_id, {})
+                # goal.assignments 中本机对应的任务层 uav_id（translated.uav_id 已是执行层）
+                for item in goal.assignments:
+                    ident = self.identity_map.identity(item.uav_id)
+                    if ident.exec_target == exec_target:
+                        offset = table.get(item.uav_id)
+                        break
+            if offset is not None:
+                translated.formation_offset.x = float(offset[0])
+                translated.formation_offset.y = float(offset[1])
+                translated.formation_offset.z = float(offset[2])
+        request.assignment = translated
         return request
 
     def _safe_hold(
@@ -729,7 +819,8 @@ class GcsABackendNode:
             request.protocol_version = PROTOCOL_VERSION
             request.mission_id = state.mission_id
             request.command_id = state.command_id
-            request.uav_id = uav_id
+            # 机载层统一使用执行层 UAVn 名称。
+            request.uav_id = exec_target
             request.exec_target = exec_target
             request.reason = reason
             try:

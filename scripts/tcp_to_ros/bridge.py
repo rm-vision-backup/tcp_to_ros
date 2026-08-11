@@ -45,6 +45,7 @@ def _assignment_to_msg(assignment: Assignment) -> TaskAssignment:
     msg.target_id = assignment.target_id
     msg.target_pose = _pose_to_msg(assignment.target_pose)
     msg.waypoints = [_pose_to_msg(item) for item in assignment.waypoints]
+    msg.formation_offset = _pose_to_msg(assignment.formation_offset)
     return msg
 
 

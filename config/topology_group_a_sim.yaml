@@ -30,6 +30,7 @@ uavs:
   - {name: UAV1, ip: 127.0.0.1, port_offset: 100}
   - {name: UAV2, ip: 127.0.0.1, port_offset: 200}
   - {name: UAV3, ip: 127.0.0.1, port_offset: 300}
+  - {name: UAV4, ip: 127.0.0.1, port_offset: 400}
 
 topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
@@ -45,10 +46,11 @@ base_port: 4200
 # Topic 桥拓扑: topology[my_name] 表示本机接收这些源的状态 Topic。
 # 仅 GCS_A 需要接收所有 UAV 的状态; UAV 之间不需要互收状态。
 topology:
-  GCS_A: [UAV1, UAV2, UAV3]
-  UAV1: [UAV2, UAV3]
-  UAV2: [UAV1, UAV3]
-  UAV3: [UAV1, UAV2]
+  GCS_A: [UAV1, UAV2, UAV3, UAV4]
+  UAV1: [UAV2, UAV3, UAV4]
+  UAV2: [UAV1, UAV3, UAV4]
+  UAV3: [UAV1, UAV2, UAV4]
+  UAV4: [UAV1, UAV2, UAV3]
 
 # 通用 Service 代理 (所有节点加载同一份完整列表, 按 target 判断角色):
 #   - name 为跨机唯一 Service 名
@@ -65,5 +67,8 @@ services:
   - {name: /UAV3/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV3}
   - {name: /UAV3/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV3}
   - {name: /UAV3/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV3}
+  - {name: /UAV4/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV4}
+  - {name: /UAV4/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV4}
+  - {name: /UAV4/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV4}
 
 service_base_port: 14000

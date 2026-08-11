@@ -1,0 +1,7 @@
+# GCS_A 编队槽位配置（key=任务层 leader_id A01..A15，value 为 follower 相对 leader 的 ENU 偏移）
+# 场景3 4机编队：UAV1/A01 leader；UAV2/A02 南5m；UAV3/A03 南10m；UAV4/A04 备用位东5m南5m
+formation_offsets:
+  A01:
+    A02: [0.0, -5.0, 0.0]
+    A03: [0.0, -10.0, 0.0]
+    A04: [0.0, -5.0, 0.0]

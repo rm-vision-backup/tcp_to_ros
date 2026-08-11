@@ -45,6 +45,7 @@ class Assignment:
     target_id: str = ""
     target_pose: Optional[Pose] = None
     waypoints: Sequence[Pose] = ()
+    formation_offset: Optional[Pose] = None
 
 
 @dataclass(frozen=True)
@@ -228,7 +229,8 @@ def _parse_assignment(command: str, value: Any) -> Assignment:
         return Assignment(uav_id=uav_id, target_pose=_parse_pose(value))
     if command == "FOLLOW_ROUTE":
         if value.get("formation_follow") is True:
-            return Assignment(uav_id=uav_id, formation_follow=True)
+            offset = _parse_optional_offset(value)
+            return Assignment(uav_id=uav_id, formation_follow=True, formation_offset=offset)
         return Assignment(uav_id=uav_id, waypoints=_parse_waypoints(value))
     if command == "FAULT_EXIT":
         return Assignment(uav_id=uav_id, waypoints=_parse_waypoints(value))
@@ -242,6 +244,16 @@ def _parse_waypoints(value: Mapping[str, Any]) -> Sequence[Pose]:
     if not isinstance(points, list) or not points:
         raise CommandValidationError("waypoints must be a non-empty array")
     return [_parse_pose(item) for item in points]
+
+
+def _parse_optional_offset(value: Mapping[str, Any]) -> Optional[Pose]:
+    """Parse an optional formation_offset {x,y,z[,yaw]} block from an assignment."""
+    offset = value.get("formation_offset")
+    if offset is None:
+        return None
+    if not isinstance(offset, dict):
+        raise CommandValidationError("formation_offset must be an object")
+    return _parse_pose(offset)
 
 
 def _parse_pose(value: Mapping[str, Any]) -> Pose:
