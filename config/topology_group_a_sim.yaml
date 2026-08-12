@@ -45,6 +45,9 @@ topics:
   # 单机状态 Topic: 不限频 (控制/状态 Topic 不得被限频丢弃)
   - {name: uav_task_state, type: swarm_uav_interfaces/UavTaskState, max_freq: 0}
   - {name: mavros/state, type: mavros_msgs/State, max_freq: 0}
+  - {name: mavros/global_position/global, type: sensor_msgs/NavSatFix, max_freq: 0}
+  - {name: mavros/local_position/pose, type: geometry_msgs/PoseStamped, max_freq: 0}
+  - {name: gp_origin_confirmed, type: std_msgs/Bool, max_freq: 0}
   # leader 位姿桥接: FOLLOW_ROUTE follower 订阅 /<leader>/mavros/local_position/odom
   - {name: mavros/local_position/odom, type: nav_msgs/Odometry, max_freq: 0}
   - {name: trajectory_intent, type: swarm_uav_interfaces/UavTrajectoryIntent, max_freq: 0}
@@ -82,48 +85,63 @@ topology:
 #   - 本机不是 target 时: 注册本地同名 ROS Service 代理, 转发到 target
 services:
   - {name: /UAV1/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV1}
+  - {name: /UAV1/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV1}
   - {name: /UAV1/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV1}
   - {name: /UAV1/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV1}
   - {name: /UAV2/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV2}
+  - {name: /UAV2/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV2}
   - {name: /UAV2/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV2}
   - {name: /UAV2/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV2}
   - {name: /UAV3/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV3}
+  - {name: /UAV3/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV3}
   - {name: /UAV3/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV3}
   - {name: /UAV3/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV3}
   - {name: /UAV4/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV4}
+  - {name: /UAV4/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV4}
   - {name: /UAV4/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV4}
   - {name: /UAV4/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV4}
   - {name: /UAV5/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV5}
+  - {name: /UAV5/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV5}
   - {name: /UAV5/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV5}
   - {name: /UAV5/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV5}
   - {name: /UAV6/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV6}
+  - {name: /UAV6/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV6}
   - {name: /UAV6/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV6}
   - {name: /UAV6/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV6}
   - {name: /UAV7/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV7}
+  - {name: /UAV7/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV7}
   - {name: /UAV7/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV7}
   - {name: /UAV7/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV7}
   - {name: /UAV8/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV8}
+  - {name: /UAV8/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV8}
   - {name: /UAV8/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV8}
   - {name: /UAV8/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV8}
   - {name: /UAV9/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV9}
+  - {name: /UAV9/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV9}
   - {name: /UAV9/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV9}
   - {name: /UAV9/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV9}
   - {name: /UAV10/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV10}
+  - {name: /UAV10/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV10}
   - {name: /UAV10/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV10}
   - {name: /UAV10/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV10}
   - {name: /UAV11/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV11}
+  - {name: /UAV11/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV11}
   - {name: /UAV11/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV11}
   - {name: /UAV11/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV11}
   - {name: /UAV12/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV12}
+  - {name: /UAV12/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV12}
   - {name: /UAV12/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV12}
   - {name: /UAV12/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV12}
   - {name: /UAV13/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV13}
+  - {name: /UAV13/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV13}
   - {name: /UAV13/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV13}
   - {name: /UAV13/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV13}
   - {name: /UAV14/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV14}
+  - {name: /UAV14/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV14}
   - {name: /UAV14/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV14}
   - {name: /UAV14/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV14}
   - {name: /UAV15/uav_task, type: swarm_uav_interfaces/UavTask, target: UAV15}
+  - {name: /UAV15/uav_task_control, type: swarm_uav_interfaces/UavTaskControl, target: UAV15}
   - {name: /UAV15/uav_hold, type: swarm_uav_interfaces/UavHold, target: UAV15}
   - {name: /UAV15/uav_safety_lease, type: swarm_uav_interfaces/UavSafetyLease, target: UAV15}
 

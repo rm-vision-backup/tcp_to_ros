@@ -63,13 +63,15 @@ GCS_A 必须：
 
 ### 分层高度（动作层语义，不属于分发层）
 
-- `MOVE_TO`：16m 高层机动，12m 中层完成；
-- `FOLLOW_ROUTE`：12m 中层执行；
-- `FAULT_EXIT`：8m 低层执行并最终降落。
+- `MOVE_TO`：首次按需起飞先完成相对 5m 检查点，再垂直到 15m、EGO 水平、垂直到目标 z；
+- `FOLLOW_ROUTE`：leader 在 12m 执行 EGO，followers 在 12m 使用 PI+固定编队偏置；
+- `FAULT_EXIT`：先垂直到 8m，再使用 EGO 水平离队。
 
 ### 安全基线（不可弃用）
 
-- 默认不自动 arm、不自动切 OFFBOARD；飞行控制由操作员手动执行。
+- arm/OFFBOARD 软件所有权只属于本机 executor；仅未 arm 的 `MOVE_TO` 在整批 PREPARE/START 门禁后按需起飞。
+- GCS_A 在任务前冻结 A01-A12 全球位置中位数与集群参考航向，A01-A15 原点回读全部确认前拒绝任务。
+- 严格垂直段冻结 x/y/yaw；运行时水平中心距小于 1.0m 且垂直中心距小于 2.0m 时整批 HOLD。
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前不得上桨。
 - 无 RC 的 PX4 SITL 需设 `COM_RCL_EXCEPT=4` + `NAV_RCL_ACT=0`，并**先切 OFFBOARD 再 arm**。
 
@@ -82,12 +84,14 @@ GCS_A 必须：
 | `implementation_plan_26081003.md` | P1：ego_planner_driver 轨迹内核 + 机间避碰集成 | 已实施 |
 | `implementation_plan_26081023.md` | 四种动作命令（MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER）补齐 | 已实施 |
 | `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
+| `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
 > `implementation_plan_26081202.md` 为**已实施计划**（2026-08-12）：修复场景 3 测试暴露的 ego
 > 状态机缺陷（IDLE 不发布 setpoint、COMPLETED/HOLD 不复位 IDLE、多机坐标系不一致），
-> 并配套 GCS_A 全局原点统一。arm+takeoff+OFFBOARD 自动化方案仅调研见附录 A（不实施）。
+> 并配套了当时的固定原点方案。该固定原点和旧自动 TAKEOFF 语义已由
+> `implementation_plan_26081223.md` 的冻结标定与 executor 按需起飞取代。
 
 ## 开发里程碑
 
@@ -101,21 +105,20 @@ GCS_A 必须：
 | 5 | 四种动作命令实现 + 场景 2+ 15 mock 验收（2026-08-11 15:00） | `docs/test_record_26081115.md` |
 | 5 | 场景 3 无头 15 机多 Master 端到端（2026-08-11 23:58） | `docs/test_record_26081123.md` |
 | 5 | ego_planner_driver 状态机修复（2026-08-12 已实施：IDLE setpoint 流 + terminal→IDLE 自动回退 + GCS_A 全局原点统一） | `plans/implementation_plan_26081202.md` |
+| 5 | 冻结坐标与固定编队、PREPARE/START、按需起飞、15/12/8m 分层动作（2026-08-13） | `plans/implementation_plan_26081223.md`、`docs/test_record_26081300.md` |
 | 6 | 实机联调（不上桨 → 上桨） | 未执行 |
 
 ## 当前状态（实时）
 
-- **已落地**：Phase 1-5；四种动作命令已在机载执行层实现；
-  `ego_planner_driver` 状态机修复已实施（2026-08-12，计划 `implementation_plan_26081202.md`）：
-  IDLE 持续 30Hz 发布 setpoint（每秒刷新 hover 目标）、COMPLETED/HOLD 冻结 2s 自动回 IDLE、
-  GCS_A 全局原点统一（`/group_a/gp_origin` 周期下发 + 机载 `set_gp_origin` 起飞前持续设置，
-  单次上限 5 次防干扰）、最大飞行速度 1.0 m/s。
-- **takeoff 脚本**：`safe_valley_exp/scripts/offboard_takeoff_15.py`（原 verification 版本迁入并
-  git 跟踪）：arm → 切 OFFBOARD → ego driver 软起飞（arm+OFFBOARD 上升沿触发，`takeoff_height_m`=5）
-  → 等 exec_state 回 IDLE；`--individual` 逐机独立子进程，避免同进程重复 rospy.init_node。
-- **验证**：ego 单测 + 全量回归 112 tests 0 failures；单 Master 生命周期冒烟
-  （IDLE→EXECUTING→COMPLETED→IDLE→HOLD→IDLE，各状态 setpoint 流不断）通过；
-  场景 3 批 1 实测 15/15 起飞悬停（统一坐标系、OFFBOARD+armed+IDLE）。
+- **已落地**：A01-A12 全员原点/航向门禁、A01-A15 原点回读确认、任务右-前-上变换、固定编队
+  1/2 精确集合、内部 PREPARE/START/ABORT、executor 按需起飞、15/12/8m 分层动作、followers PI、
+  EGO 硬 clearance 与垂直/PI 实时距离门禁。
+- **起飞所有权**：`safe_valley_exp/scripts/offboard_takeoff_15.py` 仅做只读诊断；正式 arm、OFFBOARD、
+  相对 5m 检查点和稳定 2s 都由 executor 在未 arm `MOVE_TO` 的 START 后执行。
+- **坐标冻结**：A01-A12 连续采样 2s 后逐机求全球位置中位数和圆周平均航向，任一缺失、已 arm 或
+  航向偏差超过 30° 均拒绝；冻结值在 GCS_A 进程内不变。15/15 原点回读达到水平/高度 0.1m 才就绪。
+- **验证**：2026-08-13 工作空间 `catkin build` 6/6 成功，`catkin test`/`catkin_test_results --all build`
+  合计 133 tests、0 errors、0 failures；包含 executor ROS Service/Topic rostest。
 - **场景 3 批 1 结论（2026-08-12 晚）**：`prepare` FAILURE（5/12）且全机未动。
   根因=GCS_A backend `_execute()` 的 fail-fast 预检（`UAV_LINK_UNHEALTHY`）：任务前多机
   MAVROS heartbeat 曾 SUSPECT/LOST，`is_stably_healthy` 不满足 → 整组 set_aborted，
@@ -124,7 +127,7 @@ GCS_A 必须：
   UNDISCOVERED 不阻任务；② backend 预检替换为该方法，并新增前置等待（最多 10s，每秒重评）；
   ③ 放宽 heartbeat 阈值（suspect 3→10s、lost 5→15s）以便容忍 bridge 建链初期抖动；
   ④ `ego_swarm.state_timeout_s` 从 5s 放宽到 200s 避免长轨迹规划被 driver 误判超时。
-- **未完成**：Phase 6 实机联调；场景 3 六批次全绿待后续重跑（链路健康稳定后验证）。
+- **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast。
 

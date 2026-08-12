@@ -10,10 +10,11 @@
 - `scripts/`：
   - `tcp_server_node.py`：TCP Server，仅做协议适配，把整组命令交给 Action；不承载逐机路由与聚合。
   - `gcs_a_backend_node.py`：GCS_A 分发后端（`ExecuteGroupTask` Action server）：按身份映射拆分单机任务、并发 Service 确认（单次 1.0s、首次+2 重试、0.2s 间隔、4s 预算）、订阅并聚合单机状态、至少一次请求+幂等、超时/cancel/HOLD、`ALL` 失败即停。
+  - `gcs_a_calibration_node.py`：使用 A01-A12 arm 前全球位置中位数与圆周平均航向冻结共享坐标；向 A01-A15 下发原点并等待 MAVROS `gp_origin` 回读，15/15 确认后才开放任务。
   - 单机 mock 与 direct MAVROS 执行适配由独立包 `swarm_uav_executor` 提供，避免地面站包拥有机载控制语义。
   - `mock_backend_node.py` / `task_event_injector.py`：早期整组 mock 与手动 HOLD 注入（旧闭环，仍在但分发层已改用 `gcs_a_backend_node.py`）。
   - `tcp_to_ros/`：`bridge.py`（TCP→Action 转换）、`protocol.py`（JSON 校验）、`dedup.py`、`state.py`、`identity.py`（身份映射加载）。
-- `config/`：`uav_identity_map.yaml`（A01..A15→UAV1..UAV15/hostname/IP，待复核）、`topology_group_a_sim.yaml`（Group A 多 Master 桥接/服务代理配置）、`mock_backend.yaml`；executor mock 策略由 `swarm_uav_executor` launch 参数配置。
+- `config/`：`uav_identity_map.yaml`（A01..A15→UAV1..UAV15/hostname/IP，待复核）、`formation_offsets.yaml`（固定 leader、两个编队槽位与 mission anchor）、`topology_group_a_sim.yaml`（Group A 多 Master 桥接/服务代理配置）、`mock_backend.yaml`。
 - `launch/`：`gcs_a_backend.launch`（仅 GCS_A 后端）、`gcs_a_backend_test.launch`（GCS_A 后端 + UAV1..3 mock，单 Master 语义联调）、`gcs_a_backend_fail.launch`（含失败注入）、`tcp_to_ros_mock.launch`（旧 mock 闭环）、`topology_group_a_sim.launch`（Group A 多 Master 仿真拓扑）。
 - `test/test_gcs_a_backend_client.py`：集成/回归测试客户端。
 
@@ -108,8 +109,10 @@ roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=f
 roslaunch tcp_to_ros gcs_a_backend.launch
 ```
 
-- 依赖解析：跨 Master 的 `UavTask`/`UavHold`/`UavSafetyLease` Service，以及 `UavTaskState`/`mavros_msgs/State` Topic，由 `swarm_topology_bridge` 的通用桥（Topic 桥 + Service 代理）转发；GCS_A 侧 MAVROS 状态名为 `/UAV{n}/mavros/state`；
+- 依赖解析：跨 Master 的 `UavTask`/`UavTaskControl`/`UavHold`/`UavSafetyLease` Service，以及任务状态、MAVROS state/global/local pose、原点回读 Topic，由 `swarm_topology_bridge` 通用桥转发；
 - 端口规划与命名约定见 `config/topology_group_a_sim.yaml`（port_offset 区分单机多 Master，实机 port_offset=0）。
+
+正式任务启动顺序为：机载程序在线且人工用 QGC 确认 PX4/RTK → 启动 GCS_A → 完成 12 机原点/航向冻结与 15 机原点回读 → TCP 上游发送任务。TCP 任务坐标按右-前-上解释，`mission_enu=(10,5,0)` 映射到冻结全球中位点；runtime yaw 和 runtime 编队形状不参与执行。
 
 ### 3. 与 runtime 的 TCP 联调（旧 mock 闭环）
 

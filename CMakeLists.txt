@@ -8,8 +8,10 @@ find_package(catkin REQUIRED COMPONENTS
   message_generation
   mavros_msgs
   rospy
+  sensor_msgs
   std_msgs
   swarm_uav_interfaces
+  tf
 )
 
 catkin_python_setup()
@@ -40,12 +42,15 @@ catkin_package(
   CATKIN_DEPENDS
     actionlib
     actionlib_msgs
+    geographic_msgs
     message_runtime
     mavros_msgs
     rospy
+    sensor_msgs
     std_msgs
     swarm_topology_bridge
     swarm_uav_interfaces
+    tf
 )
 
 catkin_install_python(PROGRAMS
@@ -55,7 +60,7 @@ catkin_install_python(PROGRAMS
   scripts/task_event_injector.py
   scripts/gcs_a_backend_node.py
   scripts/mock_mavros_state_node.py
-  scripts/gp_origin_publisher.py
+  scripts/gcs_a_calibration_node.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
@@ -63,6 +68,8 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_gcs_a_aggregation.py)
   catkin_add_nosetests(test/test_link_health.py)
   catkin_add_nosetests(test/test_safety_lease.py)
+  catkin_add_nosetests(test/test_calibration.py)
+  catkin_add_nosetests(test/test_fixed_formations.py)
   catkin_add_nosetests(test/test_tcp_disconnect_safety.py)
 endif()
 

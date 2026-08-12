@@ -24,6 +24,7 @@ from typing import Dict, List, Optional
 import actionlib
 import rospy
 from mavros_msgs.msg import State as MavrosState
+from std_msgs.msg import Bool, Float64
 
 from tcp_to_ros.msg import (
     ExecuteGroupTaskAction,
@@ -40,12 +41,15 @@ from swarm_uav_interfaces.srv import (
     UavHoldRequest,
     UavSafetyLease,
     UavTask,
+    UavTaskControl,
+    UavTaskControlRequest,
     UavTaskRequest,
 )
 
 from tcp_to_ros.identity import IdentityMap
 from tcp_to_ros.link_health import LOST, UavLinkMonitor
 from tcp_to_ros.safety_lease import SafetyLeaseCoordinator
+from tcp_to_ros.calibration import task_point_to_local_enu, task_vector_to_enu
 
 PROTOCOL_VERSION = "1.0"
 
@@ -54,6 +58,7 @@ PROTOCOL_VERSION = "1.0"
 # hold Service  : /{exec_target}/uav_hold
 # state Topic   : /{exec_target}/uav_task_state
 TASK_SERVICE_SUFFIX = "uav_task"
+TASK_CONTROL_SERVICE_SUFFIX = "uav_task_control"
 HOLD_SERVICE_SUFFIX = "uav_hold"
 STATE_TOPIC_SUFFIX = "uav_task_state"
 MAVROS_STATE_SUFFIX = "mavros/state"
@@ -96,6 +101,7 @@ class GroupState:
     uav_ids: List[str]
     exec_by_uav: Dict[str, str]
     start_time: float
+    start_monotonic: float = 0.0
 
     lock: threading.RLock = field(default_factory=threading.RLock)
     stop_event: threading.Event = field(default_factory=threading.Event)
@@ -105,6 +111,7 @@ class GroupState:
     # UAVs that returned accepted=true and therefore own an action which may
     # require compensation even before group ACCEPTED is formed.
     accepted_uavs: List[str] = field(default_factory=list)
+    started_uavs: List[str] = field(default_factory=list)
     terminal: Dict[str, str] = field(default_factory=dict)  # uav_id -> COMPLETED/FAILED
     latest_states: Dict[str, UavTaskState] = field(default_factory=dict)
     seen_seq: Dict[str, int] = field(default_factory=dict)  # uav_id -> max status_seq
@@ -151,8 +158,12 @@ class GcsABackendNode:
         )
 
         self.identity_map = IdentityMap.load(self.identity_map_path)
-        self.formation_offsets = self._load_formation_offsets(
+        (self.formation_offsets, self.formation_participants,
+         self.formation_leader, self.mission_anchor) = self._load_formation_offsets(
             rospy.get_param("~formation_offsets_file", ""))
+        self.require_calibration_ready = bool(rospy.get_param("~require_calibration_ready", True))
+        self.calibration_ready = not self.require_calibration_ready
+        self.reference_heading = 0.0
         enabled = [(item.uav_id, item.exec_target) for item in self.identity_map.uavs if item.enabled]
         self.link_monitor = UavLinkMonitor(
             enabled,
@@ -163,9 +174,9 @@ class GcsABackendNode:
         self.link_health_publisher = rospy.Publisher(
             rospy.get_param("~link_health_topic", "/group_a/uav_link_health"),
             UavLinkHealth, queue_size=100, latch=True)
-                self.link_health_pre_task_wait_s = float(
+        self.link_health_pre_task_wait_s = float(
             rospy.get_param("~link_health_pre_task_wait_s", 10.0))
-self.lease_coordinator = SafetyLeaseCoordinator(
+        self.lease_coordinator = SafetyLeaseCoordinator(
             self._call_safety_lease,
             float(rospy.get_param("~safety_lease_ttl_s", 5.0)),
             float(rospy.get_param("~safety_lease_call_timeout_s", 1.0)),
@@ -185,6 +196,10 @@ self.lease_coordinator = SafetyLeaseCoordinator(
         self._active_lock = threading.RLock()
 
         self._subscribe_uav_states()
+        rospy.Subscriber("/group_a/calibration_ready", Bool,
+                         lambda msg: setattr(self, "calibration_ready", bool(msg.data)), queue_size=1)
+        rospy.Subscriber("/group_a/reference_heading", Float64,
+                         lambda msg: setattr(self, "reference_heading", float(msg.data)), queue_size=1)
         self._safety_stop = threading.Event()
         self._safety_thread = threading.Thread(target=self._safety_loop, daemon=True)
         self._safety_thread.start()
@@ -219,36 +234,31 @@ self.lease_coordinator = SafetyLeaseCoordinator(
             rospy.loginfo("GCS_A subscribed to %s", mavros_topic)
 
     @staticmethod
-    def _load_formation_offsets(path: str) -> Dict[str, Dict[str, tuple]]:
+    def _load_formation_offsets(path: str):
         """Load GCS_A-side formation slot configuration.
 
-        Format (task-layer A-ids):
-          formation_offsets:
-            <leader_id>:
-              <follower_id>: [x, y, z]
+        Format (task-layer A-ids): leader_id, mission_anchor and named
+        formations with exact participants and per-aircraft offsets.
         """
         if not path:
-            return {}
+            return {}, {}, "A01", (10.0, 5.0, 0.0)
         import yaml
         try:
             with open(path, "r", encoding="utf-8") as handle:
                 raw = yaml.safe_load(handle) or {}
-            table = raw.get("formation_offsets", {}) or {}
-            offsets: Dict[str, Dict[str, tuple]] = {}
-            for leader_id, followers in table.items():
-                leader = str(leader_id)
-                offsets.setdefault(leader, {})
-                if not isinstance(followers, dict):
-                    continue
-                for follower_id, value in followers.items():
-                    try:
-                        offsets[leader][str(follower_id)] = tuple(float(v) for v in value)
-                    except (TypeError, ValueError):
-                        rospy.logwarn("invalid formation_offset for %s/%s", leader, follower_id)
-            return offsets
+            offsets = {}
+            participants = {}
+            for name, config in (raw.get("formations", {}) or {}).items():
+                participants[str(name)] = frozenset(str(v) for v in config.get("participants", []))
+                offsets[str(name)] = {
+                    str(uav): tuple(float(v) for v in value)
+                    for uav, value in (config.get("offsets", {}) or {}).items()
+                }
+            anchor = tuple(float(v) for v in raw.get("mission_anchor", [10.0, 5.0, 0.0]))
+            return offsets, participants, str(raw.get("leader_id", "A01")), anchor
         except Exception as exc:  # noqa: BLE001
             rospy.logwarn("failed to load formation_offsets from %s: %s", path, exc)
-            return {}
+            return {}, {}, "A01", (10.0, 5.0, 0.0)
 
     def _on_mavros_state(self, msg, identity) -> None:
         self.link_monitor.record_state(identity[0], identity[1], bool(msg.connected))
@@ -379,6 +389,31 @@ self.lease_coordinator = SafetyLeaseCoordinator(
             self.server.set_aborted(result, text=result.message)
             return
 
+        if self.require_calibration_ready and not self.calibration_ready:
+            result = self._build_result(
+                final_status="FAILED", failed_uavs=uav_ids,
+                error_code="CALIBRATION_NOT_READY",
+                message="global origin/reference heading calibration is not ready")
+            self.server.set_aborted(result, text=result.message)
+            return
+
+        formation_name = self._formation_for_goal(goal)
+        if str(goal.command or "") == "FOLLOW_ROUTE" and formation_name is None:
+            result = self._build_result(
+                final_status="FAILED", failed_uavs=uav_ids,
+                error_code="FORMATION_PARTICIPANTS_MISMATCH",
+                message="FOLLOW_ROUTE participants do not match a configured fixed formation")
+            self.server.set_aborted(result, text=result.message)
+            return
+        if (str(goal.command or "") == "FOLLOW_ROUTE" and
+                str(goal.leader_id or "") != self.formation_leader):
+            result = self._build_result(
+                final_status="FAILED", failed_uavs=uav_ids,
+                error_code="INVALID_FORMATION_LEADER",
+                message="FOLLOW_ROUTE leader must be %s" % self.formation_leader)
+            self.server.set_aborted(result, text=result.message)
+            return
+
         try:
             resolved = self.identity_map.resolve(uav_ids)
         except KeyError as exc:
@@ -408,22 +443,13 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                 uav_ids=uav_ids,
                 exec_by_uav={uav_id: ident.exec_target for uav_id, ident in resolved},
                 start_time=rospy.Time.now().to_sec(),
+                start_monotonic=time.monotonic(),
             )
             self._active = state
 
         unhealthy = [uav_id for uav_id in state.uav_ids
                      if not self.link_monitor.is_healthy_or_undiscovered(uav_id)]
         if unhealthy:
-            # 可选的前置等待：给所有参与机一次恢复机会，最多等待
-            # link_health_pre_task_wait_s 秒；到期仍 unhealthy 才 abort。
-            deadline = time.monotonic() + self.link_health_pre_task_wait_s
-            while time.monotonic() < deadline:
-                self.link_monitor.evaluate()
-                unhealthy = [uav_id for uav_id in state.uav_ids
-                             if not self.link_monitor.is_healthy_or_undiscovered(uav_id)]
-                if not unhealthy:
-                    break
-                time.sleep(1.0)
             with self._active_lock:
                 self._active = None
             result = self._build_result("FAILED", failed_uavs=unhealthy,
@@ -432,7 +458,8 @@ self.lease_coordinator = SafetyLeaseCoordinator(
             self.server.set_aborted(result, text=result.message)
             return
         lease_failures = self.lease_coordinator.begin_session(
-            goal.mission_id, state.exec_by_uav.items(), time.monotonic() + self.confirm_deadline_s)
+            goal.mission_id, state.exec_by_uav.items(),
+            state.start_monotonic + self.confirm_deadline_s)
         if lease_failures:
             with self._active_lock: self._active = None
             failed = [item.uav_id for item in lease_failures if item.uav_id] or list(state.uav_ids)
@@ -455,17 +482,10 @@ self.lease_coordinator = SafetyLeaseCoordinator(
             with self._active_lock:
                 if self._active is state:
                     self._active = None
-            # 释放 safety-lease 会话：尽力补发 END；即使 END 对端超时，
-            # 也强制清空 GCS_A 侧会话（机载 watchdog 会按 TTL 自愈过期），
-            # 避免残留 SESSION_ACTIVE/EPOCH 阻塞后续批次。
-            try:
-                end_deadline = time.monotonic() + self.confirm_deadline_s
-                self.lease_coordinator.end_session(end_deadline)
-            except Exception:
-                pass
-            finally:
-                with self.lease_coordinator._lock:
-                    self.lease_coordinator._session = None
+            # Safety lease spans all batches of the same mission. Aircraft are
+            # expected to remain armed between MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT;
+            # ending each batch would require a disarm and make the next epoch
+            # conflict with the still-active onboard lease.
 
     def _run_goal(self, goal, state: GroupState) -> None:
         confirm_results = self._confirm_participants(goal, state)
@@ -485,7 +505,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                     )
                 else:
                     state.message = f"confirm timeout for UAV: {unresolved[0].uav_id}"
-            self._safe_hold(state, reason="group acceptance failed")
+            self._control_participants(state, "ABORT", reason="group acceptance failed")
             result = self._build_result(
                 final_status="FAILED",
                 failed_uavs=failed_uavs,
@@ -493,6 +513,18 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                 message=state.message,
             )
             self._publish_feedback(state, phase="FAILED", detail=state.message)
+            self.server.set_aborted(result, text=result.message)
+            return
+
+        start_results = self._control_participants(state, "START")
+        start_failures = [item for item in start_results if not item.accepted]
+        if start_failures:
+            self._control_participants(state, "ABORT", reason="group START failed")
+            self._safe_hold(state, reason="group START failed")
+            failed = [item.uav_id for item in start_failures]
+            result = self._build_result("FAILED", failed_uavs=failed,
+                                        error_code="START_FAILED",
+                                        message=start_failures[0].message)
             self.server.set_aborted(result, text=result.message)
             return
 
@@ -519,8 +551,61 @@ self.lease_coordinator = SafetyLeaseCoordinator(
 
         # Now wait for per-UAV terminal states: all COMPLETED, or any FAILED,
         # timeout, or cancel.
-        deadline = state.start_time + float(goal.timeout_s)
+        deadline = state.start_monotonic + float(goal.timeout_s)
         self._wait_for_terminal(state, deadline)
+
+    def _control_participants(self, state, operation, reason=""):
+        deadline = (state.start_monotonic + self.confirm_deadline_s
+                    if operation == "START"
+                    else time.monotonic() + self.confirm_wait_s)
+        results = {uav: SingleUavConfirm(uav, target) for uav, target in state.exec_by_uav.items()}
+
+        def worker(uav_id, exec_target):
+            request = UavTaskControlRequest()
+            request.protocol_version = PROTOCOL_VERSION
+            request.operation = operation
+            request.mission_id = state.mission_id
+            request.command_id = state.command_id
+            request.uav_id = exec_target
+            request.exec_target = exec_target
+            request.reason = reason
+            for attempt in range(self.confirm_retries + 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                proxy = rospy.ServiceProxy("/{}/{}".format(exec_target, TASK_CONTROL_SERVICE_SUFFIX), UavTaskControl)
+                outcome = self._call_service_with_timeout(proxy, request, min(self.confirm_wait_s, remaining))
+                if outcome.exception is None:
+                    response = outcome.response
+                    results[uav_id].accepted = bool(response.accepted)
+                    results[uav_id].status = str(response.status or "")
+                    results[uav_id].error_code = str(response.error_code or "")
+                    results[uav_id].message = str(response.message or "")
+                    if operation == "START" and response.accepted:
+                        with state.lock:
+                            if uav_id not in state.started_uavs:
+                                state.started_uavs.append(uav_id)
+                    return
+                results[uav_id].message = str(outcome.exception)
+                if attempt < self.confirm_retries:
+                    time.sleep(min(self.confirm_retry_interval_s,
+                                   max(0.0, deadline - time.monotonic())))
+            if results[uav_id].accepted is None and not results[uav_id].message:
+                results[uav_id].message = "group acceptance deadline expired"
+
+        threads = [threading.Thread(target=worker, args=item, daemon=True)
+                   for item in state.exec_by_uav.items()]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        return [results[uav] for uav in state.uav_ids]
+
+    def _formation_for_goal(self, goal):
+        participants = frozenset(item.uav_id for item in goal.assignments)
+        matches = [name for name, configured in self.formation_participants.items()
+                   if configured == participants]
+        return matches[0] if len(matches) == 1 else None
 
     def _wait_for_terminal(self, state: GroupState, deadline: float) -> None:
         while not rospy.is_shutdown():
@@ -538,7 +623,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                 if state.terminal_count() >= len(state.uav_ids):
                     state.stop_event.set()
                     break
-                now = rospy.Time.now().to_sec()
+                now = time.monotonic()
                 if now >= deadline:
                     state.stop_event.set()
                     state.message = "group task timed out"
@@ -546,8 +631,8 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                     break
 
             self._publish_feedback(state, phase="RUNNING", detail="")
-            sleep_s = max(0.1, min(0.5, deadline - rospy.Time.now().to_sec()))
-            rospy.sleep(sleep_s)
+            sleep_s = max(0.1, min(0.5, deadline - time.monotonic()))
+            time.sleep(sleep_s)
 
         if self.server.is_preempt_requested():
             self._safe_hold(state, reason="goal cancelled")
@@ -629,7 +714,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
         confirm_deadline_s budget. A clear rejection fails the whole group fast.
         """
         # START and task confirmation share one absolute acceptance budget.
-        deadline = state.start_time + self.confirm_deadline_s
+        deadline = state.start_monotonic + self.confirm_deadline_s
         results: Dict[str, SingleUavConfirm] = {}
         results_lock = threading.Lock()
         group_failed = threading.Event()
@@ -649,7 +734,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
         # All workers share one absolute deadline. Never spend one deadline per
         # thread, otherwise a large group can violate the 4 s group decision.
         for thread in threads:
-            remaining = deadline - rospy.Time.now().to_sec()
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             thread.join(timeout=remaining)
@@ -672,7 +757,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                 return
             if rospy.is_shutdown():
                 return
-            remaining = deadline - rospy.Time.now().to_sec()
+            remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
             wait = min(self.confirm_wait_s, remaining)
@@ -705,7 +790,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
                     exc,
                 )
             if attempt < attempts - 1:
-                remaining = deadline - rospy.Time.now().to_sec()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
                 rospy.sleep(min(self.confirm_retry_interval_s, remaining))
@@ -797,23 +882,43 @@ self.lease_coordinator = SafetyLeaseCoordinator(
         # 使 executor 的 identity 校验（uav_id/exec_target）一致。
         translated = _copy.deepcopy(assignment)
         translated.uav_id = str(exec_target)
-        # 编队信息存 GCS_A：FOLLOW_ROUTE follower 若未随任务携带偏置，则按
-        # leader_id 查编队槽位配置并注入（任务层 A-id 作为 key）。
-        if str(getattr(goal, "command", "") or "") == "FOLLOW_ROUTE" and translated.formation_follow:
-            leader_task_id = str(getattr(goal, "leader_id", "") or "")
-            offset = None
-            if leader_task_id:
-                table = self.formation_offsets.get(leader_task_id, {})
-                # goal.assignments 中本机对应的任务层 uav_id（translated.uav_id 已是执行层）
-                for item in goal.assignments:
-                    ident = self.identity_map.identity(item.uav_id)
-                    if ident.exec_target == exec_target:
-                        offset = table.get(item.uav_id)
-                        break
-            if offset is not None:
-                translated.formation_offset.x = float(offset[0])
-                translated.formation_offset.y = float(offset[1])
+        task_uav_id = assignment.uav_id
+        command = str(getattr(goal, "command", "") or "")
+        formation_name = self._formation_for_goal(goal) if command == "FOLLOW_ROUTE" else None
+        # Runtime yaw is intentionally ignored. Translate task right/forward
+        # coordinates into the frozen local ENU frame before onboard dispatch.
+        def translate_pose(pose):
+            x, y, z = task_point_to_local_enu(pose.x, pose.y, pose.z,
+                                              self.reference_heading, self.mission_anchor)
+            pose.x, pose.y, pose.z, pose.yaw = x, y, z, self.reference_heading
+        if command in ("MOVE_TO", "FAULT_EXIT"):
+            if translated.waypoints:
+                for point in translated.waypoints:
+                    translate_pose(point)
+            else:
+                translate_pose(translated.target_pose)
+        elif command == "FOLLOW_ROUTE":
+            if task_uav_id == self.formation_leader:
+                translated.formation_follow = False
+                for point in translated.waypoints:
+                    translate_pose(point)
+            else:
+                translated.formation_follow = True
+                table = self.formation_offsets.get(formation_name, {})
+                offset = table.get(task_uav_id)
+                if offset is None:
+                    raise ValueError("missing fixed formation slot for %s" % task_uav_id)
+                ex, ny = task_vector_to_enu(offset[0], offset[1], self.reference_heading)
+                translated.formation_offset.x = ex
+                translated.formation_offset.y = ny
                 translated.formation_offset.z = float(offset[2])
+                translated.formation_offset.yaw = 0.0
+                leader_assignment = next(
+                    item for item in goal.assignments
+                    if item.uav_id == self.formation_leader)
+                if leader_assignment.waypoints:
+                    translated.target_pose = _copy.deepcopy(leader_assignment.waypoints[-1])
+                    translate_pose(translated.target_pose)
         request.assignment = translated
         return request
 
@@ -825,7 +930,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
             candidates = [
                 uav_id
                 for uav_id in state.uav_ids
-                if uav_id in state.accepted_uavs
+                if uav_id in state.started_uavs
                 if state.terminal.get(uav_id) is None
                 and uav_id not in state.hold_pending
                 and (skip is None or uav_id not in skip)
@@ -932,7 +1037,7 @@ self.lease_coordinator = SafetyLeaseCoordinator(
 
     @staticmethod
     def _elapsed_s(state: GroupState) -> float:
-        return rospy.Time.now().to_sec() - state.start_time
+        return time.monotonic() - state.start_monotonic
 
     def _publish_feedback(self, state: GroupState, phase: str, detail: str) -> None:
         with state.lock:

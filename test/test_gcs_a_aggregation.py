@@ -70,7 +70,7 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertEqual([], self.state.failed_uavs)
 
     def test_hold_targets_only_accepted_nonterminal_uavs(self):
-        self.state.accepted_uavs = ["A01"]
+        self.state.started_uavs = ["A01"]
         captured = []
 
         def fake_call(_proxy, request, _timeout):
@@ -111,7 +111,7 @@ class GcsAAggregationTest(unittest.TestCase):
 
         self.node._call_service_with_timeout = always_timeout
         confirm = MODULE.SingleUavConfirm("A01", "UAV1")
-        deadline = time.time() + 0.08
+        deadline = time.monotonic() + 0.08
         started = time.monotonic()
         with mock.patch.object(
             MODULE.rospy.Time,
@@ -170,7 +170,7 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertTrue(self.state.stop_event.is_set())
 
     def test_link_lost_uav_is_skipped_by_group_hold(self):
-        self.state.accepted_uavs = ["A01", "A02"]
+        self.state.started_uavs = ["A01", "A02"]
         self.state.link_lost_uavs = ["A01"]
         captured = []
 
