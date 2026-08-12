@@ -108,14 +108,22 @@ GCS_A 必须：
 - **已落地**：Phase 1-5；四种动作命令已在机载执行层实现；
   `ego_planner_driver` 状态机修复已实施（2026-08-12，计划 `implementation_plan_26081202.md`）：
   IDLE 持续 30Hz 发布 setpoint（每秒刷新 hover 目标）、COMPLETED/HOLD 冻结 2s 自动回 IDLE、
-  GCS_A 全局原点统一（`/group_a/gp_origin` 周期下发 + 机载 `set_gp_origin` 起飞前持续设置）、
-  最大飞行速度 1.0 m/s、`offboard_takeoff_15.py` 移除 `--hold` 保活逻辑。
+  GCS_A 全局原点统一（`/group_a/gp_origin` 周期下发 + 机载 `set_gp_origin` 起飞前持续设置，
+  单次上限 5 次防干扰）、最大飞行速度 1.0 m/s。
+- **takeoff 脚本**：`safe_valley_exp/scripts/offboard_takeoff_15.py`（原 verification 版本迁入并
+  git 跟踪）：arm → 切 OFFBOARD → ego driver 软起飞（arm+OFFBOARD 上升沿触发，`takeoff_height_m`=5）
+  → 等 exec_state 回 IDLE；`--individual` 逐机独立子进程，避免同进程重复 rospy.init_node。
 - **验证**：ego 单测 + 全量回归 112 tests 0 failures；单 Master 生命周期冒烟
-  （IDLE→EXECUTING→COMPLETED→IDLE→HOLD→IDLE，各状态 setpoint 流不断）通过。
-- **待验证（由用户确认）**：场景 3 无头 15 机六批次重跑（计划第 10 步，本次未实施）。
-- **未完成**：Phase 6 实机联调；ego_planner_driver 在真实 PX4 下的执行稳定性待场景 3 重跑确认。
-- **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后才可通过
-  `roslaunch tcp_to_ros` 找到；`--hold` 保活分支已从 `offboard_takeoff_15.py` 移除。
+  （IDLE→EXECUTING→COMPLETED→IDLE→HOLD→IDLE，各状态 setpoint 流不断）通过；
+  场景 3 批 1 实测 15/15 起飞悬停（统一坐标系、OFFBOARD+armed+IDLE）。
+- **场景 3 批 1 结论（2026-08-12 晚）**：`prepare` FAILURE（5/12）且全机未动。
+  根因=GCS_A backend `_execute()` 的 fail-fast 预检（`UAV_LINK_UNHEALTHY`）：任务前多机
+  MAVROS heartbeat 曾 SUSPECT/LOST，`is_stably_healthy` 不满足 → 整组 set_aborted，
+  **从未调用任何 `/UAV{n}/uav_task`、未触 HOLD**；executor 无任务记录、exec_state 均回 IDLE。
+  缓解：机载层就绪后先等 GCS_A 侧 15 机 mavros/state 连续 healthy 再发任务。
+- **未完成**：Phase 6 实机联调；场景 3 六批次全绿待后续重跑（链路健康稳定后验证）。
+- **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
+  `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast。
 
 ## 文档索引
 
