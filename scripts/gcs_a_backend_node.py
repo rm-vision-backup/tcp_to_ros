@@ -163,7 +163,9 @@ class GcsABackendNode:
         self.link_health_publisher = rospy.Publisher(
             rospy.get_param("~link_health_topic", "/group_a/uav_link_health"),
             UavLinkHealth, queue_size=100, latch=True)
-        self.lease_coordinator = SafetyLeaseCoordinator(
+                self.link_health_pre_task_wait_s = float(
+            rospy.get_param("~link_health_pre_task_wait_s", 10.0))
+self.lease_coordinator = SafetyLeaseCoordinator(
             self._call_safety_lease,
             float(rospy.get_param("~safety_lease_ttl_s", 5.0)),
             float(rospy.get_param("~safety_lease_call_timeout_s", 1.0)),
@@ -410,9 +412,20 @@ class GcsABackendNode:
             self._active = state
 
         unhealthy = [uav_id for uav_id in state.uav_ids
-                     if not self.link_monitor.is_stably_healthy(uav_id)]
+                     if not self.link_monitor.is_healthy_or_undiscovered(uav_id)]
         if unhealthy:
-            with self._active_lock: self._active = None
+            # 可选的前置等待：给所有参与机一次恢复机会，最多等待
+            # link_health_pre_task_wait_s 秒；到期仍 unhealthy 才 abort。
+            deadline = time.monotonic() + self.link_health_pre_task_wait_s
+            while time.monotonic() < deadline:
+                self.link_monitor.evaluate()
+                unhealthy = [uav_id for uav_id in state.uav_ids
+                             if not self.link_monitor.is_healthy_or_undiscovered(uav_id)]
+                if not unhealthy:
+                    break
+                time.sleep(1.0)
+            with self._active_lock:
+                self._active = None
             result = self._build_result("FAILED", failed_uavs=unhealthy,
                 error_code="UAV_LINK_UNHEALTHY",
                 message="participating UAV link is not stably healthy: %s" % ",".join(unhealthy))

@@ -144,6 +144,25 @@ class UavLinkMonitor:
                     observation.reason = reason
             return transitions
 
+    def is_healthy_or_undiscovered(self, uav_id: str, now_monotonic_s: Optional[float] = None) -> bool:
+        """Return True for UNDISCOVERED UAVs (never powered on), or HEALTHY ones.
+
+        UNDISCOVERED UAVs are considered "healthy enough" to avoid fail-fast
+        pre-checks on the group task. Only genuine link problems (stale/lost
+        heartbeat on a UAV that actually transmitted MAVROS state) are blocked.
+        """
+        now = self._clock() if now_monotonic_s is None else float(now_monotonic_s)
+        with self._lock:
+            observation = self._observations[uav_id]
+            if observation.state == UNDISCOVERED:
+                return True
+            return (
+                observation.state == HEALTHY
+                and observation.last_connected
+                and self._valid_age(observation, now) < self.suspect_after_s
+                and self._stable_for_window(observation, now)
+            )
+
     def is_stably_healthy(self, uav_id: str, now_monotonic_s: Optional[float] = None) -> bool:
         now = self._clock() if now_monotonic_s is None else float(now_monotonic_s)
         with self._lock:

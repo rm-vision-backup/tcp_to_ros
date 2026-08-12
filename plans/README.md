@@ -120,7 +120,10 @@ GCS_A 必须：
   根因=GCS_A backend `_execute()` 的 fail-fast 预检（`UAV_LINK_UNHEALTHY`）：任务前多机
   MAVROS heartbeat 曾 SUSPECT/LOST，`is_stably_healthy` 不满足 → 整组 set_aborted，
   **从未调用任何 `/UAV{n}/uav_task`、未触 HOLD**；executor 无任务记录、exec_state 均回 IDLE。
-  缓解：机载层就绪后先等 GCS_A 侧 15 机 mavros/state 连续 healthy 再发任务。
+- **链路健康修复（2026-08-12 晚）**：① link_health 新增 `is_healthy_or_undiscovered`，
+  UNDISCOVERED 不阻任务；② backend 预检替换为该方法，并新增前置等待（最多 10s，每秒重评）；
+  ③ 放宽 heartbeat 阈值（suspect 3→10s、lost 5→15s）以便容忍 bridge 建链初期抖动；
+  ④ `ego_swarm.state_timeout_s` 从 5s 放宽到 200s 避免长轨迹规划被 driver 误判超时。
 - **未完成**：Phase 6 实机联调；场景 3 六批次全绿待后续重跑（链路健康稳定后验证）。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast。
