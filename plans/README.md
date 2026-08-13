@@ -85,7 +85,7 @@ GCS_A 必须：
 | `implementation_plan_26081023.md` | 四种动作命令（MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER）补齐 | 已实施 |
 | `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
 | `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
-| `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **进行中（待实施）** |
+| `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **已实施** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
@@ -136,6 +136,12 @@ GCS_A 必须：
   （renew deadline 0.9s）且实机自组网电台（200-800ms 抖动）下必然失败，决定按
   `implementation_plan_26081406.md` 删除 lease 层，由 `link_health` + `safe_hold` 承担
   “节点丢失 → 停止 → 全悬停 → 手动接管”。
+- **lease 删除已实施（2026-08-14）**：机载 `safety_lease.py`、watchdog 线程、lease 服务与
+  `lease_guard` 门禁、driver `can_end_safety_lease`、GCS `SafetyLeaseCoordinator`、桥接拓扑
+  `uav_safety_lease` 条目、验收 launch 参数与 verification 验证脚本全部移除；
+  `UavSafetyLease.srv` 保留为 dead definition。`catkin build` 3/3 通过；GCS 22 项单元测试全过，
+  机载 51 项中 49 过 + 2 项 pre-existing FakeRos 环境失败（baseline 复现）。待无头仿真重跑六批次。 
+
 
 ## 文档索引
 
