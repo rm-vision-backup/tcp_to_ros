@@ -85,6 +85,7 @@ GCS_A 必须：
 | `implementation_plan_26081023.md` | 四种动作命令（MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER）补齐 | 已实施 |
 | `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
 | `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
+| `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **进行中（待实施）** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
@@ -130,6 +131,11 @@ GCS_A 必须：
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast。
+- **lease 删除决策（2026-08-14）**：`prepare` 多次失败根因集中在 safety lease
+  （`LEASE_START_FAILED` / `LEASE_EPOCH_CONFLICT` / `LEASE_EXPIRED` latch）；lease 时延敏感
+  （renew deadline 0.9s）且实机自组网电台（200-800ms 抖动）下必然失败，决定按
+  `implementation_plan_26081406.md` 删除 lease 层，由 `link_health` + `safe_hold` 承担
+  “节点丢失 → 停止 → 全悬停 → 手动接管”。
 
 ## 文档索引
 
