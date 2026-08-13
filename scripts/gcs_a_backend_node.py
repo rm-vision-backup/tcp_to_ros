@@ -178,8 +178,8 @@ class GcsABackendNode:
             rospy.get_param("~link_health_pre_task_wait_s", 10.0))
         self.lease_coordinator = SafetyLeaseCoordinator(
             self._call_safety_lease,
-            float(rospy.get_param("~safety_lease_ttl_s", 5.0)),
-            float(rospy.get_param("~safety_lease_call_timeout_s", 1.0)),
+            float(rospy.get_param("~safety_lease_ttl_s", 12.0)),
+            float(rospy.get_param("~safety_lease_call_timeout_s", 3.0)),
         )
 
         self.server = actionlib.SimpleActionServer(
@@ -668,7 +668,7 @@ class GcsABackendNode:
             self._safe_hold(
                 state,
                 reason="task failed on participating UAV",
-                skip=state.link_lost_uavs or state.failed_uavs,
+                skip=state.link_lost_uavs,
             )
             result = self._build_result(
                 final_status="FAILED",

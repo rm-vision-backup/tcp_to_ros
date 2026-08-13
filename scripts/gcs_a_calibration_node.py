@@ -20,7 +20,7 @@ class GcsACalibrationNode:
     def __init__(self):
         self._lock = threading.RLock()
         self.calibration_uavs = tuple(rospy.get_param(
-            "~calibration_uavs", ["A%02d" % i for i in range(1, 13)]))
+            "~calibration_uavs", ["A%02d" % i for i in range(1, 7)]))
         self.all_uavs = tuple(rospy.get_param(
             "~all_uavs", ["A%02d" % i for i in range(1, 16)]))
         self.identity = dict(rospy.get_param(
@@ -112,7 +112,7 @@ class GcsACalibrationNode:
         per_uav_headings = [circular_mean(headings[uav]) for uav in self.calibration_uavs]
         reference = circular_mean(per_uav_headings)
         if not headings_within(per_uav_headings, reference, self.max_heading_error):
-            rospy.logerr_throttle(2.0, "calibration blocked: A01-A12 heading spread exceeds 30 degrees")
+            rospy.logerr_throttle(2.0, "calibration blocked: A01-A06 heading spread exceeds 30 degrees")
             return
         self.frozen_origin = median_global(per_uav_positions)
         self.frozen_heading = reference
