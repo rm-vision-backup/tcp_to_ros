@@ -229,7 +229,7 @@ rosservice list | grep -E 'uav_task|uav_task_control|uav_hold|uav_safety_lease'
 
 ## 6. 启动 GCS_A bridge、backend、TCP
 
-### 7.1 GCS_A bridge
+### 6.1 GCS_A bridge
 
 终端 C：
 
@@ -257,7 +257,7 @@ service 检查：
 
 通过：`[ ]`    日志：____________________________
 
-### 7.2 GCS_A backend + 标定
+### 6.2 GCS_A backend + 标定
 
 终端 D：
 
@@ -287,7 +287,7 @@ backend 参数/日志：
 
 通过：`[ ]`    禁止 ready 前 arm/发任务。
 
-### 7.3 TCP server
+### 6.3 TCP server
 
 终端 E：
 
@@ -319,7 +319,7 @@ Action/Topic/Service：
 
 ## 7. 起飞与 OFFBOARD 复测
 
-### 8.1 起飞前确认
+### 7.1 起飞前确认
 
 操作员检查：
 
@@ -343,7 +343,7 @@ NAV_RCL_ACT：
 
 通过：`[ ]`
 
-### 8.2 逐机 arm + OFFBOARD
+### 7.2 逐机 arm + OFFBOARD
 
 操作员确认后，终端 F 执行：
 
@@ -377,7 +377,7 @@ failsafe：
 每批执行前填写 command/参与机/timeout。每批结束确认整批终态、逐机终态、位置、速度、mode、setpoint。  
 runtime 客户端会打印 JSON；保存完整输出，不只记 SUCCESS。
 
-### 9.1 执行命令模板
+### 8.1 执行命令模板
 
 终端 G：
 
@@ -392,7 +392,7 @@ python3 references/runtime/task_test.py --backend tcp --group A --task <TASK> \
 作用：经 TCP 发送一个完整 Group A 批次，等待整批终态。  
 预期：正常批次退出码 0、`status=SUCCESS`、`failed_robot_ids=[]`；失败批次必须记录 error 与 HOLD。
 
-### 9.2 批次记录表
+### 8.2 批次记录表
 
 | 顺序 | TASK | 命令 | 参与机 | timeout_s | command_id | 预期 | 实际结果/原始输出位置 | failed/error | HOLD 结果 | 通过 |
 |---:|---|---|---|---:|---|---|---|---|---|---|
@@ -403,7 +403,7 @@ python3 references/runtime/task_test.py --backend tcp --group A --task <TASK> \
 | 5 | `coverage-segment-2` | `FOLLOW_ROUTE` | A01-A06、A13-A15 | | | `SUCCESS`，第二编队完成 | | | | `[ ]` |
 | 6 | `hold-end` | `HOVER` | A01-A06、A13-A15 | | | `SUCCESS`，当前位置冻结/保持 | | | | `[ ]` |
 
-### 9.3 每批执行后填写
+### 8.3 每批执行后填写
 
 ```text
 批次：____________________
@@ -427,7 +427,7 @@ HOLD 请求与返回：
 异常/恢复动作：
 ```
 
-### 9.4 失败即停/HOLD 专项记录
+### 8.4 失败即停/HOLD 专项记录
 
 只在正常批次完成后做故障测试。不要直接移动 Gazebo 模型制造碰撞。  
 建议故障：暂停 Gazebo 时钟、注入可控超时、取消 Action、停止单个 bridge。一次只做一种。
@@ -461,7 +461,7 @@ setpoint 是否继续/停止：
 
 ## 9. 清理
 
-### 10.1 正常清理
+### 9.1 正常清理
 
 操作员先确认所有飞机稳定悬停或安全降落；停止 TCP 发送；再按顺序停止：
 
@@ -492,7 +492,7 @@ Gazebo/PX4 stopped：
 
 通过：`[ ]`    日志：____________________________
 
-### 10.2 清理后检查
+### 9.2 清理后检查
 
 ```bash
 ss -ltnp | grep -E '11300|11310|1131[1-9]|1132[0-5]|39001' || true
