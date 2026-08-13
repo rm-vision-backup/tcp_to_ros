@@ -128,15 +128,30 @@ roslaunch safe_valley_exp multi_uav_ego_15sim.launch gui:=true
 cd /home/ub20tg/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
+source /home/ub20tg/PX4_Firmware/Tools/setup_gazebo.bash \
+  /home/ub20tg/PX4_Firmware \
+  /home/ub20tg/PX4_Firmware/build/px4_sitl_default
+export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:/home/ub20tg/PX4_Firmware:/home/ub20tg/PX4_Firmware/Tools/sitl_gazebo"
 export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
 export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
 mkdir -p "$ROS_LOG_DIR"
 bash src/safe_valley_exp/startup_offboard_ego.sh 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 ```
 
+注意环境加载顺序：必须先 source `/opt/ros/noetic/setup.bash` 和工作空间 `devel/setup.bash`，
+再 source PX4 的 `Tools/setup_gazebo.bash`，最后恢复 `ROS_PACKAGE_PATH`。如果只 source
+catkin 工作空间，PX4 的 `px4`/Gazebo launch 依赖可能不可见，机载 roslaunch 会立即退出且不一定
+留下有效日志。当前版本的 `startup_offboard_ego.sh` 也会在内部重复加载 PX4/Gazebo 环境，这是
+为了保证脚本从新终端、后台终端或不同 shell 调用时行为一致；外部仍建议按上面的完整流程加载。
+
 预期：`/tmp/UAV1_offboard_ego.pid` … `/tmp/UAV15_offboard_ego.pid` 被创建；每个机载 Master
 分别监听 11311..11325。每机 executor 应保持 `IDLE`，MAVROS 应为 connected，飞机仍为
 disarm。若某架 launch 退出或 MAVROS 不 connected，停止并记录对应 `/tmp/UAVn_offboard_ego.log`。
+
+若需要手动验证脚本启动是否真正持续运行，应在一个保持打开的普通终端中执行上述命令；不要
+把后台启动放入会在命令结束时回收子进程的临时执行环境。只读检查可使用 `ROS_MASTER_URI`
+分别指向 11311..11325 的 `rosnode list`、`rostopic echo -n 1 /mavros/state` 和
+`rostopic echo -n 1 /exec_state`。
 
 操作者确认 15 个机载进程均在线、QGC 仍显示全部 disarm 后，再继续。
 
