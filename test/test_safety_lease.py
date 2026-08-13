@@ -30,13 +30,16 @@ class CoordinatorTest(unittest.TestCase):
         failures=item.begin_session("m",[("A01","UAV1")],time.monotonic()+.01)
         self.assertTrue(failures); self.assertEqual("LEASE_CALL_TIMEOUT",failures[0].error_code)
         time.sleep(.06); self.assertIsNone(item.session)
-    def test_failed_renew_is_not_retried(self):
+    def test_failed_renew_is_retried(self):
         renew=[]
         def call(target,req,_timeout):
-            if req.operation=="RENEW": renew.append(target); return UavSafetyLeaseResponse(False,"ACTIVE","NO_ACK","no")
+            if req.operation=="RENEW":
+                renew.append(target)
+                if len(renew) == 1:
+                    return UavSafetyLeaseResponse(False,"ACTIVE","NO_ACK","no")
             return UavSafetyLeaseResponse(True,"ACTIVE","","")
         item=SafetyLeaseCoordinator(call); item.begin_session("m",[("A01","UAV1")],time.monotonic()+1)
-        self.assertTrue(item.renew()); self.assertEqual([],item.renew()); self.assertEqual(["UAV1"],renew)
+        self.assertTrue(item.renew()); self.assertEqual([],item.renew()); self.assertEqual(["UAV1", "UAV1"],renew)
     def test_reuses_epoch_and_starts_only_new_members(self):
         calls=[]
         def call(target,req,_timeout): calls.append((target,req.operation,req.session_epoch)); return UavSafetyLeaseResponse(True,"ACTIVE","","")

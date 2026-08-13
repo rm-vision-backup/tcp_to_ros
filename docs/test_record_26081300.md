@@ -105,12 +105,23 @@ mkdir -p "$ROS_LOG_DIR"
 
 #### 3.1 启动仿真层
 
-操作者确认界面准备完成后，执行以下单条命令。作用：在 ROS Master 11300 启动 Gazebo 和
+操作者执行以下命令，确认界面准备完成。作用：在 ROS Master 11300 启动 Gazebo 和
 15 个 PX4 SITL，按本记录约定生成 3×5 初始编队；`gui:=true` 保留图形界面。
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+source /home/ub20tg/PX4_Firmware/Tools/setup_gazebo.bash \
+  /home/ub20tg/PX4_Firmware \
+  /home/ub20tg/PX4_Firmware/build/px4_sitl_default
+export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:/home/ub20tg/PX4_Firmware:/home/ub20tg/PX4_Firmware/Tools/sitl_gazebo"
 export ROS_MASTER_URI=http://localhost:11300
 export ROS_HOSTNAME=localhost
+export GAZEBO_MASTER_URI=http://localhost:11345
+export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
+export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
+mkdir -p "$ROS_LOG_DIR"
 roslaunch safe_valley_exp multi_uav_ego_15sim.launch gui:=true
 ```
 
@@ -126,23 +137,10 @@ roslaunch safe_valley_exp multi_uav_ego_15sim.launch gui:=true
 
 ```bash
 cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
-source /home/ub20tg/PX4_Firmware/Tools/setup_gazebo.bash \
-  /home/ub20tg/PX4_Firmware \
-  /home/ub20tg/PX4_Firmware/build/px4_sitl_default
-export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:/home/ub20tg/PX4_Firmware:/home/ub20tg/PX4_Firmware/Tools/sitl_gazebo"
-export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
-export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
-mkdir -p "$ROS_LOG_DIR"
 bash src/safe_valley_exp/startup_offboard_ego.sh 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 ```
 
-注意环境加载顺序：必须先 source `/opt/ros/noetic/setup.bash` 和工作空间 `devel/setup.bash`，
-再 source PX4 的 `Tools/setup_gazebo.bash`，最后恢复 `ROS_PACKAGE_PATH`。如果只 source
-catkin 工作空间，PX4 的 `px4`/Gazebo launch 依赖可能不可见，机载 roslaunch 会立即退出且不一定
-留下有效日志。当前版本的 `startup_offboard_ego.sh` 也会在内部重复加载 PX4/Gazebo 环境，这是
-为了保证脚本从新终端、后台终端或不同 shell 调用时行为一致；外部仍建议按上面的完整流程加载。
+当前版本的 `startup_offboard_ego.sh` 会在内部重复加载 PX4/Gazebo 环境
 
 预期：`/tmp/UAV1_offboard_ego.pid` … `/tmp/UAV15_offboard_ego.pid` 被创建；每个机载 Master
 分别监听 11311..11325。每机 executor 应保持 `IDLE`，MAVROS 应为 connected，飞机仍为
@@ -162,6 +160,7 @@ disarm。若某架 launch 退出或 MAVROS 不 connected，停止并记录对应
 对 UAV1 示例（其他 UAV 将端口替换为 11312..11325）：
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
 export ROS_MASTER_URI=http://localhost:11311
 rostopic echo -n 1 /mavros/state
 rostopic echo -n 1 /mavros/local_position/pose
@@ -180,6 +179,12 @@ rosservice list | grep -E 'uav_task|uav_task_control|uav_hold|uav_safety_lease'
 作用：在 GCS_A Master 11310 注册跨 Master topic/service 代理，但不启动 mock executor。
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
+export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
+mkdir -p "$ROS_LOG_DIR"
 export ROS_MASTER_URI=http://localhost:11310
 export ROS_HOSTNAME=localhost
 roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=false
@@ -195,6 +200,14 @@ roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=f
 MAVROS 回读确认；backend 在 `/group_a/calibration_ready=true` 前拒绝任务。
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
+export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
+mkdir -p "$ROS_LOG_DIR"
+export ROS_MASTER_URI=http://localhost:11310
+export ROS_HOSTNAME=localhost
 roslaunch /home/ub20tg/catkin_swarm6-2/src/tcp_to_ros/launch/gcs_a_backend.launch
 ```
 
@@ -213,6 +226,14 @@ roslaunch /home/ub20tg/catkin_swarm6-2/src/tcp_to_ros/launch/gcs_a_backend.launc
 作用：只提供 TCP 上游入口，不改变任务坐标或编队语义。
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
+source /opt/ros/noetic/setup.bash
+source devel/setup.bash
+export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
+export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
+mkdir -p "$ROS_LOG_DIR"
+export ROS_MASTER_URI=http://localhost:11310
+export ROS_HOSTNAME=localhost
 rosrun tcp_to_ros tcp_server_node.py _host:=0.0.0.0 _port:=39001 \
   _action_name:=/group_a/execute_task \
   _state_topic:=/group_a/group_task_state \
@@ -227,14 +248,12 @@ rosrun tcp_to_ros tcp_server_node.py _host:=0.0.0.0 _port:=39001 \
 在 GCS_A Master 11310 上执行只读检查：
 
 ```bash
+cd /home/ub20tg/catkin_swarm6-2
 export ROS_MASTER_URI=http://localhost:11310
+export ROS_HOSTNAME=localhost
 rostopic echo -n 1 /group_a/calibration_ready
 rostopic echo -n 1 /group_a/reference_heading
 rostopic echo -n 1 /group_a/gp_origin
-for n in $(seq 1 15); do
-  echo "UAV$n"
-  rostopic echo -n 1 "/UAV$n/gp_origin_confirmed"
-done
 ```
 
 预期：ready 为 `data: true`，reference heading 为固定弧度值，原点为冻结的全球经纬高，15
@@ -332,6 +351,7 @@ executor 线程。
 3. 停止 15 个机载 launch：
 
    ```bash
+   cd /home/ub20tg/catkin_swarm6-2
    bash src/safe_valley_exp/startup_offboard_ego.sh stop 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
    ```
 

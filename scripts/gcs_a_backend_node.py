@@ -303,14 +303,20 @@ class GcsABackendNode:
 
     def _inject_lease_failures(self, failures) -> None:
         for failure in failures:
-            with self._active_lock:
-                state = self._active
-            if state is None or failure.uav_id not in state.exec_by_uav: continue
-            with state.lock:
-                if failure.uav_id not in state.failed_uavs: state.failed_uavs.append(failure.uav_id)
-                state.error_code = "UAV_LINK_LOST"
-                state.message = "safety lease renew failed for %s: %s" % (failure.uav_id, failure.message)
-                state.stop_event.set()
+            # Lease renewal is a lightweight safety background task, not part
+            # of group task acceptance/terminal aggregation.  The onboard
+            # watchdog remains the authoritative fail-safe: if renewal really
+            # stops, its local TTL expires and it latches HOLD.  Keep the UAV
+            # active in the coordinator so transient RPC/bridge failures are
+            # retried on the next cycle instead of becoming permanent task
+            # failures after one missed renewal.
+            rospy.logwarn(
+                "safety lease renew failed for %s/%s: %s (%s); will retry",
+                failure.uav_id,
+                failure.exec_target,
+                failure.message,
+                failure.error_code,
+            )
 
     def _call_safety_lease(self, exec_target, request, timeout_s):
         proxy = rospy.ServiceProxy("/{}/{}".format(exec_target, LEASE_SERVICE_SUFFIX), UavSafetyLease)

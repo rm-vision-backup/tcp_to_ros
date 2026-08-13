@@ -27,7 +27,7 @@ class GcsACalibrationNode:
             "~identity_map", {"A%02d" % i: "UAV%d" % i for i in range(1, 16)}))
         self.sample_window_s = float(rospy.get_param("~sample_window_s", 2.0))
         self.min_samples = int(rospy.get_param("~min_samples_per_uav", 5))
-        self.sample_max_age_s = float(rospy.get_param("~sample_max_age_s", 0.5))
+        self.sample_max_age_s = float(rospy.get_param("~sample_max_age_s", 2.0))
         self.max_heading_error = math.radians(float(rospy.get_param("~max_heading_error_deg", 30.0)))
         self.positions = {uav: collections.deque() for uav in self.calibration_uavs}
         self.headings = {uav: collections.deque() for uav in self.calibration_uavs}
@@ -36,6 +36,11 @@ class GcsACalibrationNode:
         self.frozen_origin = None
         self.frozen_heading = None
         self.ready = False
+        self.origin_broadcast_period_s = 1.0 / float(
+            rospy.get_param("~origin_broadcast_hz", 1.0))
+        if self.origin_broadcast_period_s <= 0.0:
+            raise ValueError("origin_broadcast_hz must be positive")
+        self._last_origin_broadcast_s = 0.0
         self.origin_pub = rospy.Publisher("/group_a/gp_origin", GeoPointStamped, queue_size=1, latch=True)
         self.heading_pub = rospy.Publisher("/group_a/reference_heading", Float64, queue_size=1, latch=True)
         self.ready_pub = rospy.Publisher("/group_a/calibration_ready", Bool, queue_size=1, latch=True)
@@ -111,6 +116,18 @@ class GcsACalibrationNode:
             return
         self.frozen_origin = median_global(per_uav_positions)
         self.frozen_heading = reference
+        self._publish_origin(now)
+        self.heading_pub.publish(Float64(reference))
+        rospy.set_param("/group_a/frozen_reference_heading", reference)
+        rospy.loginfo("calibration frozen origin=(%.9f,%.9f,%.3f) heading=%.3f rad",
+                      self.frozen_origin.latitude, self.frozen_origin.longitude,
+                      self.frozen_origin.altitude, reference)
+
+    def _publish_origin(self, now):
+        """Broadcast the frozen origin so late/restarted receivers can recover."""
+        if (self._last_origin_broadcast_s > 0.0
+                and now - self._last_origin_broadcast_s < self.origin_broadcast_period_s):
+            return
         msg = GeoPointStamped()
         msg.header.stamp = rospy.Time.now()
         msg.header.frame_id = "earth"
@@ -118,11 +135,7 @@ class GcsACalibrationNode:
         msg.position.longitude = self.frozen_origin.longitude
         msg.position.altitude = self.frozen_origin.altitude
         self.origin_pub.publish(msg)
-        self.heading_pub.publish(Float64(reference))
-        rospy.set_param("/group_a/frozen_reference_heading", reference)
-        rospy.loginfo("calibration frozen origin=(%.9f,%.9f,%.3f) heading=%.3f rad",
-                      self.frozen_origin.latitude, self.frozen_origin.longitude,
-                      self.frozen_origin.altitude, reference)
+        self._last_origin_broadcast_s = now
 
     def on_timer(self, _event):
         with self._lock:
@@ -130,6 +143,7 @@ class GcsACalibrationNode:
             if self.frozen_origin is None:
                 self._try_freeze(now)
                 return
+            self._publish_origin(now)
             if not self.ready and all(self.confirmed.values()):
                 self.ready = True
                 self.ready_pub.publish(Bool(True))

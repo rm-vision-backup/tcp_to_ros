@@ -106,17 +106,11 @@ class SafetyLeaseCoordinator:
                     elif operation=="END": session.active.discard(uav_id)
             except Exception as error:
                 code=getattr(error,"error_code","LEASE_%s_FAILED"%operation)
-                if operation == "RENEW":
-                    with self._lock:
-                        session.active.discard(uav_id)
                 add_failure(LeaseFailure(uav_id,target,operation,code,str(error)))
         for item in targets.items():
             thread=threading.Thread(target=worker,args=item,daemon=True); thread.start(); threads.append(thread)
         for thread in threads: thread.join(max(0.0,deadline-self.clock()))
         for thread,(uav_id,target) in zip(threads,targets.items()):
             if thread.is_alive():
-                if operation == "RENEW":
-                    with self._lock:
-                        session.active.discard(uav_id)
                 add_failure(LeaseFailure(uav_id,target,operation,"LEASE_CALL_TIMEOUT","deadline exceeded"))
         return failures
