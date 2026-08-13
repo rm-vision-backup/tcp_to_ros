@@ -109,7 +109,7 @@ roslaunch tcp_to_ros topology_group_a_sim.launch uav_name:=GCS_A run_uav_mock:=f
 roslaunch tcp_to_ros gcs_a_backend.launch
 ```
 
-- 依赖解析：跨 Master 的 `UavTask`/`UavTaskControl`/`UavHold`/`UavSafetyLease` Service，以及任务状态、MAVROS state/global/local pose、原点回读 Topic，由 `swarm_topology_bridge` 通用桥转发；
+- 依赖解析：跨 Master 的 `UavTask`/`UavTaskControl`/`UavHold` Service，以及任务状态、MAVROS state/global/local pose、原点回读 Topic，由 `swarm_topology_bridge` 通用桥转发；
 - 端口规划与命名约定见 `config/topology_group_a_sim.yaml`（port_offset 区分单机多 Master，实机 port_offset=0）。
 
 正式任务启动顺序为：机载程序在线且人工用 QGC 确认 PX4/RTK → 启动 GCS_A → 完成 12 机原点/航向冻结与 15 机原点回读 → TCP 上游发送任务。TCP 任务坐标按右-前-上解释，`mission_enu=(10,5,0)` 映射到冻结全球中位点；runtime yaw 和 runtime 编队形状不参与执行。

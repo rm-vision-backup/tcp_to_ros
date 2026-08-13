@@ -39,7 +39,6 @@ from swarm_uav_interfaces.msg import TaskAssignment, UavLinkHealth, UavTaskState
 from swarm_uav_interfaces.srv import (
     UavHold,
     UavHoldRequest,
-    UavSafetyLease,
     UavTask,
     UavTaskControl,
     UavTaskControlRequest,
@@ -48,7 +47,6 @@ from swarm_uav_interfaces.srv import (
 
 from tcp_to_ros.identity import IdentityMap
 from tcp_to_ros.link_health import LOST, UavLinkMonitor
-from tcp_to_ros.safety_lease import SafetyLeaseCoordinator
 from tcp_to_ros.calibration import task_point_to_local_enu, task_vector_to_enu
 
 PROTOCOL_VERSION = "1.0"
@@ -62,7 +60,6 @@ TASK_CONTROL_SERVICE_SUFFIX = "uav_task_control"
 HOLD_SERVICE_SUFFIX = "uav_hold"
 STATE_TOPIC_SUFFIX = "uav_task_state"
 MAVROS_STATE_SUFFIX = "mavros/state"
-LEASE_SERVICE_SUFFIX = "uav_safety_lease"
 
 # Confirm plan constants
 DEFAULT_CONFIRM_WAIT_S = 1.0
@@ -176,12 +173,6 @@ class GcsABackendNode:
             UavLinkHealth, queue_size=100, latch=True)
         self.link_health_pre_task_wait_s = float(
             rospy.get_param("~link_health_pre_task_wait_s", 10.0))
-        self.lease_coordinator = SafetyLeaseCoordinator(
-            self._call_safety_lease,
-            float(rospy.get_param("~safety_lease_ttl_s", 12.0)),
-            float(rospy.get_param("~safety_lease_call_timeout_s", 3.0)),
-        )
-
         self.server = actionlib.SimpleActionServer(
             self.action_name,
             ExecuteGroupTaskAction,
@@ -264,23 +255,14 @@ class GcsABackendNode:
         self.link_monitor.record_state(identity[0], identity[1], bool(msg.connected))
 
     def _safety_loop(self) -> None:
-        next_renew = time.monotonic()
         while not self._safety_stop.wait(0.1):
             self._evaluate_link_health()
-            now = time.monotonic()
-            if now >= next_renew:
-                failures = self.lease_coordinator.renew(now + 0.9)
-                self._inject_lease_failures(failures)
-                next_renew = now + 1.0
 
     def _evaluate_link_health(self) -> None:
         transitions = self.link_monitor.evaluate()
-        session = self.lease_coordinator.session
-        mission_id = session.mission_id if session else ""
-        epoch = session.epoch if session else ""
         for transition in transitions:
             snapshot = self.link_monitor.snapshot(
-                transition.uav_id, rospy.Time.now().to_sec(), mission_id, epoch)
+                transition.uav_id, rospy.Time.now().to_sec(), "", "")
             self.link_health_publisher.publish(snapshot)
             rospy.logwarn("UAV link %s/%s %s -> %s age=%.3f reason=%s",
                           transition.uav_id, transition.exec_target,
@@ -300,29 +282,6 @@ class GcsABackendNode:
             state.error_code = "UAV_LINK_LOST"
             state.message = "UAV link lost: %s" % uav_id
             state.stop_event.set()
-
-    def _inject_lease_failures(self, failures) -> None:
-        for failure in failures:
-            # Lease renewal is a lightweight safety background task, not part
-            # of group task acceptance/terminal aggregation.  The onboard
-            # watchdog remains the authoritative fail-safe: if renewal really
-            # stops, its local TTL expires and it latches HOLD.  Keep the UAV
-            # active in the coordinator so transient RPC/bridge failures are
-            # retried on the next cycle instead of becoming permanent task
-            # failures after one missed renewal.
-            rospy.logwarn(
-                "safety lease renew failed for %s/%s: %s (%s); will retry",
-                failure.uav_id,
-                failure.exec_target,
-                failure.message,
-                failure.error_code,
-            )
-
-    def _call_safety_lease(self, exec_target, request, timeout_s):
-        proxy = rospy.ServiceProxy("/{}/{}".format(exec_target, LEASE_SERVICE_SUFFIX), UavSafetyLease)
-        outcome = self._call_service_with_timeout(proxy, request, timeout_s)
-        if outcome.exception is not None: raise outcome.exception
-        return outcome.response
 
     def _translate_onboard_uav_id(self, msg: UavTaskState, state: GroupState):
         """Map an onboard-reported exec-layer UAVn id back to the task-layer
@@ -463,16 +422,6 @@ class GcsABackendNode:
                 message="participating UAV link is not stably healthy: %s" % ",".join(unhealthy))
             self.server.set_aborted(result, text=result.message)
             return
-        lease_failures = self.lease_coordinator.begin_session(
-            goal.mission_id, state.exec_by_uav.items(),
-            state.start_monotonic + self.confirm_deadline_s)
-        if lease_failures:
-            with self._active_lock: self._active = None
-            failed = [item.uav_id for item in lease_failures if item.uav_id] or list(state.uav_ids)
-            result = self._build_result("FAILED", failed_uavs=failed,
-                error_code="LEASE_START_FAILED", message=lease_failures[0].message)
-            self.server.set_aborted(result, text=result.message)
-            return
 
         rospy.loginfo(
             "GCS_A goal %s/%s command=%s uavs=%s",
@@ -488,10 +437,6 @@ class GcsABackendNode:
             with self._active_lock:
                 if self._active is state:
                     self._active = None
-            # Safety lease spans all batches of the same mission. Aircraft are
-            # expected to remain armed between MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT;
-            # ending each batch would require a disarm and make the next epoch
-            # conflict with the still-active onboard lease.
 
     def _run_goal(self, goal, state: GroupState) -> None:
         confirm_results = self._confirm_participants(goal, state)
@@ -1036,8 +981,6 @@ class GcsABackendNode:
             self._safety_stop.set()
         if hasattr(self, "_safety_thread") and self._safety_thread is not threading.current_thread():
             self._safety_thread.join(1.5)
-        if getattr(self, "lease_coordinator", None) and self.lease_coordinator.session:
-            rospy.logerr("GCS_A shutting down with an active safety lease; UAV watchdogs will expire locally")
 
     # ------------------------------------------------------------------ utils
 

@@ -21,7 +21,6 @@
     <arg name="uav_id" value="A01" />
     <arg name="result_delay_s" value="0.5" />
     <arg name="message" value="mock uav1 task finished" />
-    <arg name="safety_lease_required" value="true" />
   </include>
 
   <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
@@ -29,7 +28,6 @@
     <arg name="uav_id" value="A02" />
     <arg name="result_delay_s" value="0.5" />
     <arg name="message" value="mock uav2 task finished" />
-    <arg name="safety_lease_required" value="true" />
   </include>
 
   <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">
@@ -37,7 +35,6 @@
     <arg name="uav_id" value="A03" />
     <arg name="result_delay_s" value="0.5" />
     <arg name="message" value="mock uav3 task finished" />
-    <arg name="safety_lease_required" value="true" />
   </include>
   <node pkg="tcp_to_ros" type="mock_mavros_state_node.py" name="mock_state_uav1">
     <param name="topic" value="/UAV1/mavros/state" />

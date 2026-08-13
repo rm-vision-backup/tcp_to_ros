@@ -31,7 +31,6 @@
       <arg name="state_topic" value="/uav_task_state" />
       <arg name="result_delay_s" value="0.5" />
       <arg name="message" value="mock $(arg uav_name) task finished" />
-      <arg name="safety_lease_required" value="true" />
     </include>
     <node pkg="tcp_to_ros" type="mock_mavros_state_node.py" name="mock_mavros_state" output="screen">
       <param name="topic" value="/mavros/state" />

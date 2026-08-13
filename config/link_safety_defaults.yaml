@@ -2,6 +2,4 @@ link_suspect_after_s: 10.0
 link_lost_after_s: 15.0
 link_healthy_window_s: 3.0
 link_health_topic: /group_a/uav_link_health
-safety_lease_ttl_s: 12.0
-safety_lease_call_timeout_s: 3.0
 link_health_pre_task_wait_s: 10.0
