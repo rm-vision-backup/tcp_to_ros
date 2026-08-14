@@ -959,7 +959,13 @@ class GcsABackendNode:
                 accepted=False,
                 message="active group mission_id mismatch",
             )
-        self.server.cancel_goal_at_server()
+        # SimpleActionServer 没有 cancel_goal_at_server（那是 client 的方法）。
+        # 设置 active group 的 stop_event 让 _execute/_wait_for_terminal 线程
+        # 自行终止并发布终态结果；随后对所有活动参与机执行安全 HOLD。
+        with state.lock:
+            state.stop_event.set()
+            state.message = request.reason or "emergency hold"
+            state.error_code = "EMERGENCY_HOLD"
         self._safe_hold(state, reason=request.reason or "emergency hold")
         with state.lock:
             held_ok = all(uav_id in state.held for uav_id in state.uav_ids)

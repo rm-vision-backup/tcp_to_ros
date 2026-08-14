@@ -137,10 +137,6 @@ class GcsAAggregationTest(unittest.TestCase):
         self.state.accepted_uavs = ["A01"]
         self.node._active = self.state
         self.node._active_lock = threading.RLock()
-        cancelled = []
-        self.node.server = type(
-            "Server", (), {"cancel_goal_at_server": lambda _self: cancelled.append(True)}
-        )()
 
         def fake_hold(state, reason):
             self.assertEqual("operator cancel", reason)
@@ -155,7 +151,10 @@ class GcsAAggregationTest(unittest.TestCase):
 
         self.assertFalse(response.accepted)
         self.assertEqual("hold unconfirmed for: A01", response.message)
-        self.assertEqual([True], cancelled)
+        # EmergencyHold must stop the executing group thread so it publishes a
+        # terminal result, instead of calling a nonexistent server cancel API.
+        self.assertTrue(self.state.stop_event.is_set())
+        self.assertEqual("EMERGENCY_HOLD", self.state.error_code)
 
     def test_link_loss_affects_only_participating_uav(self):
         self.node._active = self.state
