@@ -112,22 +112,41 @@ src/tcp_to_ros/docs/test_record_26081402.md
 
 ## 5. 编译与运行（含换设备/换 workspace 注意）
 
-### 5.1 前置
+### 5.1 前置（路径已变量化，换环境只改三个变量）
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2   # 其他设备请替换为实际路径
+# 换设备/换用户名时，只需修改下面三个变量：
+WS=/home/ub20tg/catkin_swarm6-2     # 工作空间根目录（含 src/devel/build）
+PX4_ROOT=/home/ub20tg/PX4_Firmware  # PX4 固件根目录
+PX4_BUILD="$PX4_ROOT/build/px4_sitl_default"
+
+cd "$WS"
 source /opt/ros/noetic/setup.bash
-catkin build                       # 6 包全量构建
-source devel/setup.bash
-# PX4/Gazebo（仿真）
-source /home/ub20tg/PX4_Firmware/Tools/setup_gazebo.bash \
-  /home/ub20tg/PX4_Firmware /home/ub20tg/PX4_Firmware/build/px4_sitl_default
-export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:/home/ub20tg/PX4_Firmware:/home/ub20tg/PX4_Firmware/Tools/sitl_gazebo"
-# 统一 ROS 日志
-mkdir -p /home/ub20tg/catkin_swarm6-2/.ros_home/log
-export ROS_HOME=/home/ub20tg/catkin_swarm6-2/.ros_home
-export ROS_LOG_DIR=/home/ub20tg/catkin_swarm6-2/.ros_home/log
+catkin build                        # 6 包全量构建（首次或代码变更后）
+source "$WS/devel/setup.bash"
+# PX4/Gazebo（仿真需要）
+source "$PX4_ROOT/Tools/setup_gazebo.bash" "$PX4_ROOT" "$PX4_BUILD"
+export ROS_PACKAGE_PATH="$ROS_PACKAGE_PATH:$PX4_ROOT:$PX4_ROOT/Tools/sitl_gazebo"
+# 统一 ROS 日志（避免散落 ~/.ros）
+mkdir -p "$WS/.ros_home/log"
+export ROS_HOME="$WS/.ros_home"
+export ROS_LOG_DIR="$WS/.ros_home/log"
 ```
+
+#### 换环境必须修改的硬编码位置（当前使用绝对路径）
+
+> 当前许多脚本/文档写死了 `/home/ub20tg/...`。换设备/换用户名后，除上面三个变量外，
+> 还要改下列文件内的绝对路径（建议全局替换 `/home/ub20tg` 为实际家目录）：
+
+| 文件 | 硬编码内容 | 说明 |
+|---|---|---|
+| `src/safe_valley_exp/startup_offboard_ego.sh` | 第 16-21 行：`ROS_HOME`/`ROS_LOG_DIR`/`WS`/`PX4_ROOT` | 机载层批量启动脚本；换环境必改 |
+| `src/safe_valley_exp/scripts/offboard_takeoff_15.py` | `ROS_SETUP`/`WS` 常量 | 起飞脚本；换环境必改 |
+| 本文档及 `docs/test_record_26081402.md` 内命令 | 每节 `cd /home/ub20tg/catkin_swarm6-2`、`export ...=/home/ub20tg/...` | 复制命令前先替换 |
+| `references/runtime/` 脚本（若本机运行 runtime） | 运行路径 | 可选，runtime 用相对路径为主 |
+
+> 只依赖 ROS 标准安装（`/opt/ros/noetic`）的路径通常不用改；涉及 `PX4_Firmware`、`catkin_swarm6-2`、
+> `ub20tg`（用户名）的都需按实际环境替换。
 
 ### 5.2 换设备 / 新 workspace 必须注意
 
@@ -155,7 +174,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ---
 
-## 6. 关键设计决策（给后续开发）
+## 6. 已落地的关键设计决策（帮助理解现有代码，非后续开发）
 
 - **删除飞行安全租约（lease）**：原机制（renew 1Hz/TTL 5s/锁存）在仿真高负载与自组网电台（200-800ms 抖动）下必然失败；
   改为 `link_health`（MAVROS state 心跳 → DISCOVERED/HEALTHY/SUSPECT/LOST/RECOVERED）+ `safe_hold`。
@@ -166,7 +185,43 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ---
 
-## 7. 已知问题与安全边界
+## 7. 后续开发需求
+
+以下为本阶段已识别的后续开发项，供下一个 coding agent 排期与实施：
+
+### 7.a ego_planner_driver 仍未通过完整验证
+
+- 已通过单测（状态机 8 项、轨迹测试）与单 Master 冒烟，但**多机 SITL 六批次端到端仍未跑通**。
+- 曾修复 hold 捕获竞态（`192ad03`），但 prepare 重跑尚未进行；ego 轨迹在真实 PX4 下的执行
+  稳定性（垂直→水平→垂直分层、长航点、机间互惠避碰）仍需多机验证。
+
+### 7.b 航点密化尚未实现
+
+- TCP 上游下发的航点只有关键点，过于稀疏；ego_planner_driver 直接参数化会导致 B-spline
+  初始轨迹不贴合航线。需要在上层或驱动层**按最大间隔插值密化**（例如相邻航点间距 ≤2m；
+  思路已验证于 `verification/plot_ego_bspline_waypoints.py`），但尚未接入实现。
+
+### 7.c 实机部署方案待确定
+
+- 仿真用多 Master（11300/11310/11311-11325）就是为了模拟"地面站与每台机载电脑各有独立 IP"。
+- 需要明确：哪些包部署在 GCS 地面站（tcp_to_ros + bridge + interfaces），哪些部署在每台机载
+  电脑（executor + bridge + interfaces），MAVROS/PX4 在本机还是远端；形成实机 IP/主机名映射，
+  并复核冻结 `uav_identity_map.yaml`（当前仅仿真规则 A0n→UAVn→192.168.5.x，实机必改）。
+
+### 7.d safe_valley_exp 需要拆解
+
+- 当前只借用了它的个别 launch（`uav_offboard_ego.launch`、`multi_uav_ego_15sim.launch`）和配置，
+  其核心 flock 算法并未在工程中真正应用。需要把真正使用的 launch/配置/起飞脚本拆解到对应
+  功能包（或新建仿真包），避免把示例包当成依赖、误导部署。
+
+### 7.e takeoff 脚本需按实机重构
+
+- 当前 `offboard_takeoff_15.py` 面向 15 机本地 SITL（固定端口 11311-11325、本机执行），
+  实机每台机载电脑独立 IP/端口，无法直接使用。
+- 重构方向：参数化 UAV 列表与 ROS Master URI；把 arm/OFFBOARD 职责与 executor 的
+  PREPARE/START 对齐（避免双控制器）；考虑由 GCS_A 经 bridge 统一发 arm/OFFBOARD，或每机独立脚本。
+
+## 8. 已知问题与安全边界
 
 - `POSE_STALE` 只表示规划输入过期，不等于飞机停止；执行中位姿失联的最终兜底仍依赖 PX4 failsafe（`COM_OBL_ACT` 等）。
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；实机前必须冻结 `COM_OF_LOSS_T`、`COM_OBL_ACT`、RC/datalink failsafe、急停职责、场地许可。
@@ -175,7 +230,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ---
 
-## 8. 给下一个 coding agent 的快速指引
+## 9. 给下一个 coding agent 的快速指引
 
 1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `docs/test_record_26081402.md`（最新实测手册）。
 2. 当前主任务：**重跑 prepare 六批次**（竞态修复 `192ad03` 后），随后做断 bridge → link_health LOST → safe_hold 故障注入验证。
@@ -185,7 +240,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ---
 
-## 9. 文档索引
+## 10. 文档索引
 
 | 路径 | 内容 |
 |---|---|
