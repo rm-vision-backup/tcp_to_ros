@@ -94,8 +94,6 @@ roslaunch safe_valley_exp multi_uav_ego_15sim.launch gui:=true
 
 ```bash
 cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
 bash src/safe_valley_exp/startup_offboard_ego.sh 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 ```
 
@@ -195,8 +193,6 @@ rosrun tcp_to_ros tcp_server_node.py _host:=0.0.0.0 _port:=39001 \
 
 ```bash
 cd /home/ub20tg/catkin_swarm6-2
-source /opt/ros/noetic/setup.bash
-source devel/setup.bash
 python3 src/safe_valley_exp/scripts/offboard_takeoff_15.py 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15
 ```
 
