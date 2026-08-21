@@ -25,7 +25,16 @@ class CalibrationMathTest(unittest.TestCase):
         self.assertAlmostEqual(task_vector_to_enu(5.0, 10.0, 0.0)[0], 10.0)
         self.assertAlmostEqual(task_vector_to_enu(5.0, 10.0, 0.0)[1], -5.0)
         x, y, z = task_point_to_local_enu(15.0, 15.0, 3.0, 0.0)
-        self.assertEqual((x, y, z), (10.0, -5.0, 3.0))
+        self.assertEqual((x, y, z), (15.0, -15.0, 3.0))
+
+    def test_task_origin_aligns_with_ekf_origin(self):
+        # mission_anchor=[0,0,0]：任务原点（右/前 0,0）与 EKF 原点（A01-A06
+        # 中位数，set_gp_origin 冻结）对齐，任务点只按参考航向旋转。
+        # A01 prepare 目标 (17.5 右, 50 前, 12) -> EKF ENU (50, -17.5, 12)。
+        x, y, z = task_point_to_local_enu(17.5, 50.0, 12.0, 0.0, anchor=(0.0, 0.0, 0.0))
+        self.assertAlmostEqual(x, 50.0)
+        self.assertAlmostEqual(y, -17.5)
+        self.assertAlmostEqual(z, 12.0)
 
 
 if __name__ == "__main__":

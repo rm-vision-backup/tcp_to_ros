@@ -52,7 +52,15 @@ def task_vector_to_enu(x_right: float, y_forward: float, heading: float) -> Tupl
 
 
 def task_point_to_local_enu(x: float, y: float, z: float, heading: float,
-                            anchor=(10.0, 5.0, 0.0)) -> Tuple[float, float, float]:
+                            anchor=(0.0, 0.0, 0.0)) -> Tuple[float, float, float]:
+    """Translate a task-frame (right/forward/up) point into ROS ENU.
+
+    The task frame is right x 0-100m / forward y 0-150m relative to the
+    mission origin.  The mission origin is aligned with the EKF origin
+    (calibration freezes the A01-A06 global-position median into
+    set_gp_origin), so mission_anchor stays [0,0,0] and the task point is
+    rotated by the reference heading only.
+    """
     dx = float(x) - float(anchor[0])
     dy = float(y) - float(anchor[1])
     ex, ny = task_vector_to_enu(dx, dy, heading)

@@ -35,7 +35,8 @@ class FixedFormationTest(unittest.TestCase):
         self.assertEqual(self.node._formation_for_goal(Goal(ids1)), "formation_1")
         self.assertEqual(self.node._formation_for_goal(Goal(ids2)), "formation_2")
         self.assertEqual(self.leader, "A01")
-        self.assertEqual(self.anchor, (10.0, 5.0, 0.0))
+        # mission_anchor=[0,0,0]：任务原点与 EKF 原点（标定冻结的 A01-A06 中位数）对齐
+        self.assertEqual(self.anchor, (0.0, 0.0, 0.0))
 
     def test_missing_member_is_rejected(self):
         self.assertIsNone(self.node._formation_for_goal(Goal(["A%02d" % i for i in range(1, 12)])))

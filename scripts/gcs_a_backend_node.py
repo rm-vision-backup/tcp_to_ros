@@ -232,7 +232,7 @@ class GcsABackendNode:
         formations with exact participants and per-aircraft offsets.
         """
         if not path:
-            return {}, {}, "A01", (10.0, 5.0, 0.0)
+            return {}, {}, "A01", (0.0, 0.0, 0.0)
         import yaml
         try:
             with open(path, "r", encoding="utf-8") as handle:
@@ -245,11 +245,13 @@ class GcsABackendNode:
                     str(uav): tuple(float(v) for v in value)
                     for uav, value in (config.get("offsets", {}) or {}).items()
                 }
-            anchor = tuple(float(v) for v in raw.get("mission_anchor", [10.0, 5.0, 0.0]))
+            # mission_anchor 必须为 [0,0,0]：任务原点（右/前 0,0）与 EKF 原点对齐，
+            # EKF 原点由标定冻结为 A01-A06 全球位置中位数（set_gp_origin）。
+            anchor = tuple(float(v) for v in raw.get("mission_anchor", [0.0, 0.0, 0.0]))
             return offsets, participants, str(raw.get("leader_id", "A01")), anchor
         except Exception as exc:  # noqa: BLE001
             rospy.logwarn("failed to load formation_offsets from %s: %s", path, exc)
-            return {}, {}, "A01", (10.0, 5.0, 0.0)
+            return {}, {}, "A01", (0.0, 0.0, 0.0)
 
     def _on_mavros_state(self, msg, identity) -> None:
         self.link_monitor.record_state(identity[0], identity[1], bool(msg.connected))
