@@ -2,7 +2,7 @@
 
 [Overview]
 
-针对 2026-08-22 有头模式 prepare 复测暴露的问题（详见 `docs/test_record_26081402.md` §2.8.1）：
+针对 2026-08-22 有头模式 prepare 复测暴露的问题（复测数据与结构说明见 `docs/test_record_26082300.md`）：
 
 1. **速度超标**：轨迹峰值 10.6 m/s（远超 1.0 m/s 预期）。根因：C++ `planOnce` 一次规划完整航线（全局规划），
    稀疏关键点 + 固定 knot span ts=0.4 把整条航线压缩进少量 B-spline 控制点；`max_vel` 为软惩罚
@@ -68,7 +68,10 @@
 
 ### 文档
 
-- `docs/test_record_26081402.md` §2.8：追加 prepare 结构说明与 2026-08-22 复测结果（§2.8.1）。
+- 新增 `docs/test_record_26082300.md`：方案 B 测试记录。
+  - **复用** `docs/test_record_26081402.md` §2.1-2.7（环境/仿真层/机载层/GCS/标定/TCP/起飞）的
+    步骤、预期与结果（简写引用，不复制正文）。
+  - **详写**本计划单元测试与端到端批次任务测试的步骤/预期/结果（结果在测试执行前留空）。
 - `plans/README.md`：实施计划表登记本计划（待实施）。
 
 [Functions]
@@ -98,23 +101,32 @@
 
 [Testing]
 
-### 单元测试
+测试记录：`docs/test_record_26082300.md`（单元测试与端到端批次任务测试的详细步骤/预期/结果见该文档，
+结果在测试执行前留空）。
 
-- `test_ego_swarm_driver.py`：
-  - MOVE_TO 生成分层关键点：垂直升 15m → 水平 → 垂直降目标 z；
-  - 2 m 密化后相邻点距 ≤2.0 m；
+### 复用步骤（预期/结果沿用 `docs/test_record_26081402.md`）
+
+- `test_record_26081402.md` §2.1 ROS/PX4 环境、§2.2 仿真层、§2.3 机载层、§2.4 GCS bridge、
+  §2.5 backend+标定、§2.6 TCP server、§2.7 逐机 takeoff 的步骤/预期/结果直接复用，本计划不重复。
+
+### 单元测试（详写见 test_record_26082300.md §2）
+
+- `test_ego_swarm_driver.py`（`swarm_uav_executor`）：
+  - MOVE_TO 分层关键点生成：垂直升 15m → 水平 → 垂直降目标 z；
+  - 2m 密化后相邻点距 ≤2.0m；
   - MOVE_TO 发布 `/waypoints`（PolygonStamped）而非 `/goal`；
-  - HOVER 保持冻结 setpoint。
-- `test_trajectory.cpp`：
+  - HOVER 保持冻结 setpoint；
+  - FAULT_EXIT 先垂直 8m 层再水平。
+- `test_trajectory.cpp`（`ego_planner_driver`）：
   - horizon 截取：waypoints 超出 horizon 时只取前方部分，`local_target_pt_` 为截取段末点；
   - 滚动：到达 horizon 末端后再次规划下一段；
   - 全局退化：`planning_horizon<=0` 时一次规划完整航线（回归兼容）。
 - `catkin_test_results --all build` 0 failure。
 
-### 端到端（后续有头/无头验证，本计划实施后执行）
+### 端到端批次任务测试（详写见 test_record_26082300.md §3）
 
-- prepare：12 机编队到达且 `status=SUCCESS`（终点偏差 ≤0.2m 容差）；速度 ≤1.5m/s；出现 15m 层；
-  机间最小距离 ≥1m。
+- prepare（A01-A12 MOVE_TO）：12 机编队到达且 `status=SUCCESS`（终点偏差 ≤0.2m 容差）、
+  速度 ≤1.5m/s、出现 15m 层、机间最小距离 ≥1m。
 - 依次 coverage-segment-1 / fault-exit / recovery / coverage-segment-2 / hold-end。
 
 [Implementation Order]
@@ -123,5 +135,5 @@
 2. `ego_planner_core.cpp` / `driver_node.cpp`：删除全局密化，加 `planning_horizon` 截取与滚动重规划；
    更新 C++ 单测。
 3. launch/config 参数对齐；`catkin build` 6 包全过；全量单测回归。
-4. 有头模式端到端验证 prepare（速度/分层/避碰/到达），再依次跑其余批次。
-5. 结果回写 `docs/test_record_2608xxxx.md`，各包独立 commit（Conventional Commit），不 push。
+4. 有头/无头模式端到端验证 prepare（速度/分层/避碰/到达），再依次跑其余批次。
+5. 结果回写 `docs/test_record_26082300.md`，各包独立 commit（Conventional Commit），不 push。

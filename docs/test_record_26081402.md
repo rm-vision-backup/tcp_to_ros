@@ -220,30 +220,6 @@ python3 references/runtime/task_test.py --backend tcp --group A --task <TASK> \
 
 【结果】prepare：FAIL（见 §3 根因）；coverage-segment-1 / fault-exit / recovery / coverage-segment-2 / hold-end：未执行（prepare FAIL，批次继续条件未满足，不继续批次）。
 
-#### 2.8.1 prepare 批次结构说明与 2026-08-22 有头模式复测
-
-> 2026-08-22 有头模式（15 机 PX4 SITL + GUI）在坐标修复（`b4f99c3`，mission_anchor=[0,0,0]）
-> 与航点密化（`0aaab11`，2m 间距）后重测 prepare。
-
-**批次结构**：
-- 命令：`MOVE_TO`；参与机：A01-A12；目标：任务坐标（右/前/上）经 `task_point_to_local_enu`
-  （anchor=[0,0,0]，按参考航向旋转）转 EKF ENU 单点目标。
-- A01 目标 ENU=(50,-17.5,12)；编队 4 列×3 行（x=45/50/55，y=-12.5/-17.5/-22.5/-27.5）。
-- 期望动作结构：垂直 15m 层 → EGO 水平 → 垂直目标 z（当前实现为直线三维轨迹，未分层）。
-
-**复测结果**：
-- ✅ **编队形成**：12 机到达目标附近（终点偏差 1.3-1.6m，z≈12m），编队结构正确
-  （坐标修复生效，不再飞向错误位置）。
-- ⚠️ `status=TIMEOUT`（150s 绝对期限，`failed_robot_ids=[]`）：终点偏差 > 0.2m 到达容差，
-  driver 未判 `COMPLETED`。
-- ⚠️ **速度峰值 10.6 m/s**（预期 1.0 m/s）：全局规划 + 稀疏控制点导致 B-spline 时间压缩，
-  PX4 位置环全速追。
-- ⚠️ **无 15m 层**：z 一路爬升至目标 12m。
-- ⚠️ **机间最小距离 0.93 m**（UAV6-UAV7，t≈8s，交叉飞行，<1m 水平门禁）。
-
-**根因与修复方向**：见 `plans/implementation_plan_26082300.md`（方案 B：机载分层航点 2m 密化 +
-C++ `planning_horizon` 滚动局部规划，对齐原版 ego-planner-swarm）。
-
 ### 2.9 测试结束清理
 
 ```bash
