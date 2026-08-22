@@ -86,6 +86,7 @@ GCS_A 必须：
 | `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
 | `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
 | `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **已实施** |
+| `implementation_plan_26082300.md` | 方案 B：机载分层航点 2m 密化 + C++ `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm） | **待实施** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
@@ -140,7 +141,16 @@ GCS_A 必须：
   `lease_guard` 门禁、driver `can_end_safety_lease`、GCS `SafetyLeaseCoordinator`、桥接拓扑
   `uav_safety_lease` 条目、验收 launch 参数与 verification 验证脚本全部移除；
   `UavSafetyLease.srv` 保留为 dead definition。`catkin build` 3/3 通过；GCS 22 项单元测试全过，
-  机载 51 项中 49 过 + 2 项 pre-existing FakeRos 环境失败（baseline 复现）。待无头仿真重跑六批次。 
+  机载 51 项中 49 过 + 2 项 pre-existing FakeRos 环境失败（baseline 复现）。待无头仿真重跑六批次。
+- **坐标修复与密化已实施（2026-08-22/23）**：mission_anchor 由 [10,5,0] 对齐为 [0,0,0]
+  （tcp_to_ros `b4f99c3`，任务原点=EKF 原点=A01-A06 中位）；`EgoPlannerCore::planOnce` 参数化前
+  按 2m 间距密化（ego_planner_driver `0aaab11`）。8/22 有头 prepare 复测编队形成，但 TIMEOUT
+  （终点偏差 1.3-1.6m > 0.2m 容差）、速度峰值 10.6m/s、无 15m 分层、机间最小距离 0.93m。
+- **方案 B 决策（2026-08-23）**：针对 prepare 复测问题，采用
+  `implementation_plan_26082300.md`：上层（EgoSwarmDriver）按命令生成含动作分层的关键点序列并
+  按 2m 间距密化后发布 waypoints；C++ 引入 `planning_horizon` 滚动局部规划（对齐原版
+  ego-planner-swarm receding-horizon），移除 C++ 全局密化。已推送各仓库"全局规划最后快照"
+  空提交（`chore(ego): snapshot global-planning milestone before local replan`）。
 
 
 ## 文档索引
