@@ -13,18 +13,21 @@
 
 **方案 B（对齐原版 ego-planner-swarm 的 receding-horizon 思路）**：
 
-- **上层（`swarm_uav_executor` 的 `EgoSwarmDriver`）**：按 `command` 生成含动作分层的关键点序列
-  （垂直上升点、水平航点、垂直下降点），对关键点序列按最大 2 m 间距均匀密化，作为 waypoints 发布给
-  C++（`onWaypoints`）。**不在 C++ 中做全局密化**。
+- **上层（`swarm_uav_executor` 的 `EgoSwarmDriver`）**：按 `command` 生成含动作分层的关键点序列，
+  **关键点序列纳入当前位置 start**（执行前 HOLD 态读取一次），对关键点序列按最大 0.4 m 间距均匀密化
+  （对齐原版 ego-planner-swarm 控制点间距 0.4 m），作为 waypoints 发布给 C++（`onWaypoints`）。
+  **不在 C++ 中做全局密化**。
 - **C++（`ego_planner_driver`）**：引入 `planning_horizon`，每次规划只取当前位置前方 horizon 内的局部
   点（含 waypoints 弧长截取），轨迹执行到 horizon 末端时滚动取下一段重新规划；对齐原版动态局部规划。
 - **移除** C++ `planOnce` 内的 `densifyPoints`（全局密化）与 `waypoint_max_spacing` 参数。
 
 分层高度沿用冻结语义：`MOVE_TO` 15 m 层、`FOLLOW_ROUTE` leader 12 m 层、`FAULT_EXIT` 8 m 层。
-垂直段与水平段统一参与 2 m 密化（规避 B-spline 平滑切角）。
+垂直段与水平段统一参与 0.4 m 密化（start 纳入序列后垂直爬升/下降段也有足够控制点，规避 B-spline
+平滑把垂直段拉斜）。
 
-速度控制：2 m 密化 + horizon 内控制点少 → 优化快；`max_vel=1.0` 惩罚在控制点充足时可将轨迹速度
-压到 1 m/s 量级。1 m/s 是安全措施而非硬指标，实测达标后可在 launch 参数放宽。
+速度控制：0.4 m 密化（原版控制点间距）+ horizon 5 m → 每段 ~12 控制点 → B-spline 有足够控制点
+把速度压到 `max_vel` 量级；`max_vel=1.0` 惩罚生效。1 m/s 是安全措施而非硬指标，实测达标后可在
+launch 参数放宽。
 
 [Types]
 
@@ -33,7 +36,7 @@
   - **删除** `double waypoint_max_spacing;`（密化已移到上层）。
 - `swarm_uav_executor/src/swarm_uav_executor/drivers/ego_swarm.py`：
   - 新增驱动层参数：`layer_move_to=15.0`、`layer_follow_route=12.0`、`layer_fault_exit=8.0`、
-    `waypoint_densify_spacing=2.0`（关键点密化最大间距）。
+    `waypoint_densify_spacing=0.4`（关键点密化最大间距，对齐原版 control_points_distance=0.4）。
 - 复用冻结契约：`MotionGoal`（含 `command/layer_z/waypoints`）、`UavTrajectoryIntent` 均不改变。
 
 [Files]
@@ -42,16 +45,17 @@
 
 - `src/swarm_uav_executor/src/swarm_uav_executor/drivers/ego_swarm.py`：
   - 新增 `_build_layered_keypoints(goal, start)`：按 `goal.command` 生成分层关键点序列
-    （MOVE_TO/FAULT_EXIT/FOLLOW_ROUTE leader）；垂直段在关键点序列中体现为 z 变化的关键点。
+    （MOVE_TO/FAULT_EXIT/FOLLOW_ROUTE leader）；**序列首个点 = 当前位置 start**（执行前 HOLD 态
+    读取一次），垂直段在关键点序列中体现为 z 变化的关键点。
   - 新增 `_densify_waypoints(points, max_spacing)`：port `verification/plot_ego_bspline_waypoints.py`
-    `densify_waypoints`，逐段均匀插值使相邻点距 ≤2 m。
+    `densify_waypoints`，逐段均匀插值使相邻点距 ≤0.4 m（含垂直段）。
   - `start_move_to` / `_plan_horizontal` 改造：MOVE_TO / FAULT_EXIT / FOLLOW_ROUTE(leader) →
-    分层关键点 → 2 m 密化 → `_publish_waypoints`（替代 MOVE_TO 的 `_publish_goal` 单点发布）；
-    HOVER 保持现状（冻结位姿 setpoint）。
+    分层关键点（含 start）→ 0.4 m 密化 → `_publish_waypoints`（替代 MOVE_TO 的 `_publish_goal`
+    单点发布）；HOVER 保持现状（冻结位姿 setpoint）。
   - `from_ros_params` 读取新增参数。
 - `src/swarm_uav_executor/config/executor_defaults.yaml`：`ego_swarm` 段新增 layer/密化参数。
 - `src/swarm_uav_executor/launch/uav_executor_ego.launch`：转发新增参数。
-- `test/test_ego_swarm_driver.py`：新增分层关键点生成、2 m 密化间距、MOVE_TO 发布 waypoints 用例。
+- `test/test_ego_swarm_driver.py`：新增分层关键点生成（含 start）、0.4 m 密化间距、MOVE_TO 发布 waypoints 用例。
 
 ### 修改 `ego_planner_driver`（horizon 局部规划，C++）
 
@@ -78,8 +82,8 @@
 
 - 上层（`ego_swarm.py`）：
   - `_build_layered_keypoints(goal, start) -> List[Tuple[float,float,float]]`：按命令生成
-    MOVE_TO（start→(sx,sy,15)→(gx,gy,15)→(gx,gy,gz)）、FAULT_EXIT（→8m 层）、FOLLOW_ROUTE leader
-    （12m 层 route）的关键点序列；垂直段保留 z 变化关键点。
+    MOVE_TO（[start]→垂直 15m→水平目标上方→垂直降 gz）、FAULT_EXIT（→8m 层）、FOLLOW_ROUTE leader
+    （12m 层 route）的关键点序列；**start 为首个关键点**，垂直段保留 z 变化关键点。
   - `_densify_waypoints(points, max_spacing) -> List[...]`：逐对点 `segments=max(1,ceil(dist/spacing))` 均匀插值。
   - `_plan_horizontal(goal, cancel, deadline)`：按命令走 `_publish_waypoints`（密化后）。
 - C++：
@@ -112,9 +116,9 @@
 ### 单元测试（详写见 test_record_26082300.md §2）
 
 - `test_ego_swarm_driver.py`（`swarm_uav_executor`）：
-  - MOVE_TO 分层关键点生成：垂直升 15m → 水平 → 垂直降目标 z；
-  - 2m 密化后相邻点距 ≤2.0m；
-  - MOVE_TO 发布 `/waypoints`（PolygonStamped）而非 `/goal`；
+  - MOVE_TO 分层关键点生成：序列含 start（垂直升 15m → 水平 → 垂直降目标 z）；
+  - 0.4m 密化后相邻点距 ≤0.4m；
+  - MOVE_TO 发布 `/waypoints`（PolygonStamped，首点=start）而非 `/goal`；
   - HOVER 保持冻结 setpoint；
   - FAULT_EXIT 先垂直 8m 层再水平。
 - `test_trajectory.cpp`（`ego_planner_driver`）：
@@ -131,7 +135,7 @@
 
 [Implementation Order]
 
-1. `ego_swarm.py`：分层关键点 + 2 m 密化 + MOVE_TO 改发 waypoints；单测通过。
+1. `ego_swarm.py`：分层关键点（含 start）+ 0.4 m 密化 + MOVE_TO 改发 waypoints；单测通过。
 2. `ego_planner_core.cpp` / `driver_node.cpp`：删除全局密化，加 `planning_horizon` 截取与滚动重规划；
    更新 C++ 单测。
 3. launch/config 参数对齐；`catkin build` 6 包全过；全量单测回归。
