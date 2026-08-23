@@ -98,13 +98,14 @@
 - 【预期】`status=SUCCESS`、`failed_robot_ids=[]`；12 机到达目标（终点偏差 ≤0.2 m）；
   飞行速度峰值 ≤1.5 m/s；MOVE_TO 出现 15m 层（z 先到 15 再水平、最后垂直 12m）；
   机间最小距离 ≥1.0 m。
-- 【结果】**`status=SUCCESS`、`failed_robot_ids=[]`（首次通过）**：
+- 【结果】**`status=SUCCESS`、`failed_robot_ids=[]`（2026-08-23 16:22 首次通过）**：
   - 终点偏差 0.2-0.3 m（≤0.6 m 容差，PX4 OFFBOARD 稳态偏差量级）；
   - 速度峰值 1.10-1.29 m/s（≤1.5 m/s 达标）；
   - 分层执行：z 先爬升到 15 m（zmax 15.1）→ 水平 EGO → 垂直降到 12 m；
   - **机间最小距离 0.64 m（UAV3-UAV4）**：仍 <1.0 m 门禁，避障待进一步处理；
   - 任务结束后高度俯冲（z→9.2 m）为 cleanup 停止 offboard 后 PX4 自主降落，非任务问题。
   - 图：`.tmp/analyze_ulog/prepare_trajectory_review.png`、`uav1_realtime.png`。
+- 【结果】
 
 ### 3.2 coverage-segment-1（A01-A12 `FOLLOW_ROUTE`，timeout 480s）
 

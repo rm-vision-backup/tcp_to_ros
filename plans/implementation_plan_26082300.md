@@ -40,6 +40,17 @@ launch 参数放宽。
   setpoint 悬停），不再切 HOLD；后续 HOLD/新任务由 `onHold`/`onGoal` 正常接管。
 - 位置容差 `position_tolerance_m` 0.2 → **0.6 m**（接受 0.3-0.5 m PX4 稳态偏差，对齐原版 1.0 m 量级）。
 
+### 补充 3：滚动段间 vel/acc 连续 + periodic replan（时间触发）
+
+- 根因：滚动段每次从当前位姿 start 重新规划，B-spline 起始导数未约束（全零）→ **段间速度/加速度跳变**
+  （PX4 全速追新段，vmax 9.9）；且滚动仅在"到达段末"触发，段内邻居信息不更新，动态避障陈旧。
+- 修改：
+  - `planOnce` 增加起始 `start_vel`/`start_acc` 参数，传入 B-spline `start_end_derivatives`
+    （`[0, start_vel, start_acc, 0]`）；node 滚动时从当前轨迹**数值微分**取当前 vel/acc → 段间连续；
+  - 滚动触发改为 **periodic（时间触发）**：新增 `replan_period_s`（默认 1.0，对齐原版
+    `fsm/thresh_replan_time=1.0`），EXECUTING 且 `elapsed >= 周期` 且仍有 remaining waypoints →
+    置 `planning_requested_`；保留到达段末触发（最终段 `COMPLETED`）。
+
 ### 补充 2：移植 swarm rebound 硬推机制（无 A\*，waypoints 替代 A\* 路径）
 
 - 根因：移植仅有 swarm 软惩罚（`calcSwarmCost` dist_err²），实测 `lambda_swarm` 1.0→1.5 无效
@@ -164,3 +175,54 @@ launch 参数放宽。
 3. launch/config 参数对齐；`catkin build` 6 包全过；全量单测回归。
 4. 有头/无头模式端到端验证 prepare（速度/分层/避碰/到达），再依次跑其余批次。
 5. 结果回写 `docs/test_record_26082300.md`，各包独立 commit（Conventional Commit），不 push。
+
+## 补充 4：修复滚动 replan 簿记 bug（UAV 停在半途，2026-08-23 有头诊断确认）
+
+### 现象
+
+- 2026-08-23 有头模式 15 机 prepare：confirm 通过、任务下发给 driver、12 机从 5m 爬到
+  ~6.2m 后全部停滞（EXECUTING 保持但位置不动），150s TIMEOUT。
+- 单机诊断（UAV1 注入 waypoints，目标 z=9.4m）：正常爬到 ~8.3m 后停滞，setpoint 30Hz
+  持续发布但轨迹终点≈当前位置；`traj_id` 每 1s 递增（periodic replan 在触发）。
+
+### 根因（滚动簿记提前 consume）
+
+`replanOnce` 滚动簿记逻辑：
+
+```cpp
+// 1) 截取：从 remaining_waypoints_.front() 开始累积弧长到 horizon
+data.waypoints = truncateToHorizon(remaining_waypoints_, horizon, start);
+data.planned_waypoint_count = data.waypoints.size();
+// 2) 规划成功后：erase 本次规划覆盖的点数
+remaining_waypoints_.erase(begin, begin + planned_waypoint_count);
+```
+
+问题：第一次规划时 `truncateToHorizon` 取前 N 个点（horizon 段）并 `erase`，
+**但 UAV 实际只执行了其中一部分**（执行滞后于簿记，planning_horizon 截取按几何弧长、
+执行按轨迹时间推进）。periodic replan（每 1s）时：
+
+- `remaining_waypoints_` 首点已在 UAV 前方数米（前次 erase 提前消耗）；
+- `truncateToHorizon` 把「首点距 start 的距离」计入 horizon 预算 → 每段只取 0-2 个点；
+- 新轨迹终点≈当前位置 → UAV 原地停滞，periodic replan 反复触发。
+
+### 修改
+
+- `ego_planner_driver/src/ego_planner_driver_node.cpp`：
+  - 移除 `remaining_waypoints_` 按 `planned_waypoint_count` erase 的簿记；
+  - 改为**按 UAV 实际弧长推进**：新增 `waypoint_consumed_`（size_t 索引），每次 replan 时
+    从 `waypoints_` 中取 start 前方（沿折线弧长投影）尚未消费的点，`truncateToHorizon`
+    只保留前方 horizon 内点；
+  - `truncateToHorizon` 的弧长累积**从 start 出发**（不再从 remaining.front()），并允许
+    截取起点前移（先丢弃 start 已越过的点）；
+  - `publishSetpoint` periodic 触发条件与 `checkArrival` 的「仍有后续航点」判断改用
+    `waypoint_consumed_ < waypoints_.size()`；
+  - `onWaypoints`/`onGoal` 重置 `waypoint_consumed_=0`。
+- `include/ego_planner_driver/ego_planner_driver_node.h`：删除 `remaining_waypoints_`，
+  新增 `waypoint_consumed_`。
+- `test/test_trajectory.cpp` / `test/test_ego_state_machine.cpp`：新增/更新滚动簿记用例
+  （连续两次 replan，第二次从实际位置取 horizon 段，轨迹终点持续推进）。
+
+### 验证
+
+- 单测：`catkin test ego_planner_driver` 全量 0 failure。
+- 无头 prepare：UAV 持续推进（不再停滞半途），150s 内 SUCCESS 或接近目标。
