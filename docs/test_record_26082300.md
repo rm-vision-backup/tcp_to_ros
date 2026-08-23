@@ -105,7 +105,16 @@
   - **机间最小距离 0.64 m（UAV3-UAV4）**：仍 <1.0 m 门禁，避障待进一步处理；
   - 任务结束后高度俯冲（z→9.2 m）为 cleanup 停止 offboard 后 PX4 自主降落，非任务问题。
   - 图：`.tmp/analyze_ulog/prepare_trajectory_review.png`、`uav1_realtime.png`。
-- 【结果】
+- 【结果】**滚动 replan 修复后复测 `status=SUCCESS`、`failed_robot_ids=[]`（2026-08-23 20:2x 无头）**：
+  - 复现背景：先修复 `replanLoop` 未应用滚动窗口的 bug（一次规划 120+ 点长航线被 B-spline
+    压缩在起点附近，水平位移 ~0.1m → UAV 停在 15m 层起点），并把 `replan_period_s` 1.0→4.0
+    （1.0s 打断轨迹导致 PX4 无法加速，实测 0.2 m/s）；
+  - 复测结果：12 机全部 `COMPLETED`，形成 3×4 网格（x 44.9-55.0 / y -12.8..-27.8 / z=12.0m）；
+  - 分层：z 先爬 15m 层 → 水平推进 → 垂直降 12m（终态 z 精确 12.0）；
+  - 速度：水平巡航 ~1 m/s（vmax 1.05-1.12，符合 max_vel=1.0）；启动爬升段速度 ~0.2-0.3 m/s；
+  - 任务时长 ~155s（timeout 180s 内完成）；
+  - 备注：水平速度在 0-1.2 m/s 间随每段轨迹衔接波动（"一顿一顿"），不影响任务成功；
+    机间距离/避障门禁待 coverage 批次继续验证。
 
 ### 3.2 coverage-segment-1（A01-A12 `FOLLOW_ROUTE`，timeout 480s）
 
