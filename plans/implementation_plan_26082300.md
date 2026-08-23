@@ -29,6 +29,29 @@
 把速度压到 `max_vel` 量级；`max_vel=1.0` 惩罚生效。1 m/s 是安全措施而非硬指标，实测达标后可在
 launch 参数放宽。
 
+## 补充修改（2026-08-23 无头复测后追加）
+
+### 补充 1：C++ 到达最终目标后发布 COMPLETED 终态
+
+- 根因：`checkArrival` 到达最终目标后直接 `setState(kStateHold)`，C++ **从不发布 `COMPLETED`**；
+  executor `_wait_for_terminal` 只认 `COMPLETED` 为成功、`HOLD` 判 `COMMAND_HELD` 失败 →
+  MOVE_TO 即使飞机到位（终点偏差 0.2-0.4m）也从未产生成功终态，prepare 恒 TIMEOUT。
+- 修改：到达最终目标后**先 `setState(kStateCompleted)`** 并冻结 `steady_target_`（持续发布目标
+  setpoint 悬停），不再切 HOLD；后续 HOLD/新任务由 `onHold`/`onGoal` 正常接管。
+- 位置容差 `position_tolerance_m` 0.2 → **0.6 m**（接受 0.3-0.5 m PX4 稳态偏差，对齐原版 1.0 m 量级）。
+
+### 补充 2：移植 swarm rebound 硬推机制（无 A\*，waypoints 替代 A\* 路径）
+
+- 根因：移植仅有 swarm 软惩罚（`calcSwarmCost` dist_err²），实测 `lambda_swarm` 1.0→1.5 无效
+  （机间距离 0.81→0.53 m，反而更近）；原版除软惩罚外还有 `check_collision_and_rebound`（A\* 路径
+  求安全参考 + 把侵入控制点硬推到安全面，STOP_FOR_REBOUND 后重新优化）。
+- 修改：移植 rebound 到**邻机避障**，**用密化 waypoints 替代 A\* 路径作为安全参考**：
+  - 新增 `reboundFromNeighbors(neighbors, waypoints, clearance)`：对侵入邻机 clearance 的控制点
+    （前 2/3，时间同步采样邻机轨迹），推开方向取"椭球归一方向去除沿 waypoints 切向分量"（即沿
+    waypoints 法向避让，不脱离航线方向），把控制点硬推到 clearance 外；
+  - `planOnce` 优化后接入（用推开后的控制点重新采样轨迹），保留 `checkClearance` 硬校验兜底；
+  - 新参数 `swarm_rebound`（默认 true）；`lambda_swarm` 回 **1.0**（软惩罚保留为基础，rebound 为硬机制）。
+
 [Types]
 
 - `ego_planner_driver/include/ego_planner_driver/ego_planner_core.h`：
