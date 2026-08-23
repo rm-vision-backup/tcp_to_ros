@@ -22,8 +22,8 @@ swarm_topology_bridge  跨 ROS Master 的 Topic 桥 + Service 代理（每台机
         │
 swarm_uav_executor     每架 UAVn 的任务执行器（PREPARE/START/ABORT/HOLD + 状态上报）
         │
-        ├─ ego_planner_driver    C++ B-spline 带时轨迹 + 机间互惠避碰（30Hz setpoint）
-        └─ MAVROS / PX4 SITL     飞控（仿真或实机）
+        ├─ ego_planner_driver    C++ B-spline 带时轨迹 + 机间互惠避碰（30Hz PositionTarget 候选）
+        └─ setpoint_relay        MAVROS `/mavros/setpoint_raw/local` 唯一发布者（仲裁/失效 HOLD）→ PX4
 ```
 
 **坐标约定**：任务坐标按右/前/上解释；GCS_A 用 A01-A06 arm 前全球位置中位数冻结全局原点，

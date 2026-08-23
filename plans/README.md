@@ -86,7 +86,8 @@ GCS_A 必须：
 | `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
 | `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
 | `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **已实施** |
-| `implementation_plan_26082300.md` | 方案 B：机载分层航点 2m 密化 + C++ `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm） | **待实施** |
+| `implementation_plan_26082300.md` | 方案 B：机载分层航点 0.4m 密化 + C++ `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm） | **部分实施（核心代码与 prepare 已完成；避碰及其余批次未验收）** |
+| `implementation_plan_26082322.md` | 周期性零速修复：EGO/follower 分源 `PositionTarget` + relay 唯一出口、仲裁与失效 HOLD | **已实施（2026-08-24，含 prepare 无头验收）** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
@@ -142,15 +143,22 @@ GCS_A 必须：
   `uav_safety_lease` 条目、验收 launch 参数与 verification 验证脚本全部移除；
   `UavSafetyLease.srv` 保留为 dead definition。`catkin build` 3/3 通过；GCS 22 项单元测试全过，
   机载 51 项中 49 过 + 2 项 pre-existing FakeRos 环境失败（baseline 复现）。待无头仿真重跑六批次。
-- **坐标修复与密化已实施（2026-08-22/23）**：mission_anchor 由 [10,5,0] 对齐为 [0,0,0]
-  （tcp_to_ros `b4f99c3`，任务原点=EKF 原点=A01-A06 中位）；`EgoPlannerCore::planOnce` 参数化前
-  按 2m 间距密化（ego_planner_driver `0aaab11`）。8/22 有头 prepare 复测编队形成，但 TIMEOUT
-  （终点偏差 1.3-1.6m > 0.2m 容差）、速度峰值 10.6m/s、无 15m 分层、机间最小距离 0.93m。
-- **方案 B 决策（2026-08-23）**：针对 prepare 复测问题，采用
-  `implementation_plan_26082300.md`：上层（EgoSwarmDriver）按命令生成含动作分层的关键点序列并
-  按 2m 间距密化后发布 waypoints；C++ 引入 `planning_horizon` 滚动局部规划（对齐原版
-  ego-planner-swarm receding-horizon），移除 C++ 全局密化。已推送各仓库"全局规划最后快照"
-  空提交（`chore(ego): snapshot global-planning milestone before local replan`）。
+- **方案 B 已实施部分（2026-08-23）**：`implementation_plan_26082300.md` 的核心代码与补充修复已落地：
+  `EgoSwarmDriver` 生成含 start 的 15/12/8m 分层关键点并按最大 0.4m 间距密化；C++ 移除全局密化，
+  使用 5m `planning_horizon`、周期重规划和按实际位置推进的滚动窗口；滚动段继承 vel/acc，最终到达
+  发布 `COMPLETED`，位置容差调整为 0.6m；邻机 swarm rebound 硬推已接入。相关 Python/C++ 用例已补齐，
+  当次记录为 6 包构建成功、133 tests、0 errors、0 failures（详见 `docs/test_record_26082300.md`）。
+- **方案 B prepare 验收结果**：无头 15 机环境中 A01-A12 `prepare` 已 `SUCCESS`，12 机全部
+  `COMPLETED`；完成 15m→水平→12m 分层，终点偏差 0.2-0.3m，速度峰值 1.05-1.12m/s。
+- **方案 B 未完成部分**：prepare 实测机间最小距离曾为 0.64m，未达到 ≥1.0m 安全门禁；
+  `coverage-segment-1`、`fault-exit`、`recovery`、`coverage-segment-2`、`hold-end` 尚未执行，
+  Phase 6 实机验收也未执行。当前 `ego_planner_driver` 工作树另有未提交的速度平滑改动，不能视为
+  已归档实施结果；周期性速度降零问题转由 `implementation_plan_26082322.md` 继续处理。
+- **26082322 已实施（2026-08-24）**：EGO 改发 P/V/A/yaw `PositionTarget`（mask 2048）、follower
+  改发显式 position/velocity/yaw 候选（mask 2496）、`setpoint_relay` 独占
+  `/mavros/setpoint_raw/local` 并实现选源/generation 隔离/freshness/finite 校验/固定位置 HOLD，
+  `replan_period_s` 恢复为 1.0 s；旧 `/setpoint` PoseStamped 链路与旁路发布已清理。详见
+  `docs/test_record_26082400.md`。
 
 
 ## 文档索引
