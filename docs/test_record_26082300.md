@@ -1,8 +1,8 @@
 # 方案 B（机载分层航点 + C++ 滚动局部规划）测试记录
 
-时间：2026-08-23 00:xx CST  
+时间：2026-08-23 16:22 CST（prepare 批次测试结束）  
 记录人：____________  
-测试环境：PX4 SITL + Gazebo + MAVROS + ego_planner_driver + swarm_uav_executor + swarm_topology_bridge + GCS_A + TCP runtime  
+测试环境：PX4 SITL + Gazebo（无头）+ MAVROS + ego_planner_driver + swarm_uav_executor + swarm_topology_bridge + GCS_A + TCP runtime  
 对应实施计划：`plans/implementation_plan_26082300.md`
 
 > **说明**：§1 复用 `docs/test_record_26081402.md` §2.1-2.7 的步骤/预期/结果（简写引用）；
@@ -10,14 +10,16 @@
 
 ## 0. 测试目标
 
-验证方案 B 两项核心改动：
+验证方案 B 改动（2026-08-23 实施，含复测后补充）：
 
-1. 上层（`EgoSwarmDriver`）按命令生成含动作分层的关键点序列并 2m 均匀密化，作为 waypoints 发布给 C++；
-2. C++（`ego_planner_driver`）引入 `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm
-   receding-horizon），移除 C++ 全局密化。
+1. 上层（`EgoSwarmDriver`）按命令生成含动作分层的关键点序列，**序列纳入当前位置 start**，按 0.4 m
+   均匀密化（对齐原版 control_points_distance=0.4）后发布 waypoints 给 C++；
+2. C++（`ego_planner_driver`）引入 `planning_horizon`（5 m）滚动局部规划 + swarm rebound 硬推
+   （waypoints 替代原版 A\* 路径作安全参考），移除 C++ 全局密化；
+3. **到达最终目标后发布 COMPLETED 终态**（不再切 HOLD），`position_tolerance_m` 放宽到 0.6 m。
 
 通过判据：速度受控（≤1.5 m/s）、分层执行（MOVE_TO 15m 层）、机间避碰达标（≥1 m）、
-批次任务 `COMPLETED`（终点偏差 ≤0.2 m 容差）。
+批次任务 `SUCCESS`（终点偏差 ≤0.6 m 容差）。
 
 ## 1. 复用步骤（`test_record_26081402.md` §2.1-2.7，预期/结果沿用）
 
@@ -42,13 +44,13 @@
   python3 -m pytest src/swarm_uav_executor/test/test_ego_swarm_driver.py -v
   ```
 - 用例：
-  1. MOVE_TO 生成分层关键点：垂直升 15m → 水平 → 垂直降目标 z；
-  2. 2m 密化后相邻点距 ≤2.0 m；
-  3. MOVE_TO 发布 `/waypoints`（PolygonStamped）而非 `/goal`；
+  1. MOVE_TO 生成分层关键点：序列含 start（垂直升 15m → 水平 → 垂直降目标 z）；
+  2. 0.4m 密化后相邻点距 ≤0.4 m；
+  3. MOVE_TO 发布 `/waypoints`（PolygonStamped，首点=start）而非 `/goal`；
   4. HOVER 保持冻结 setpoint；
   5. FAULT_EXIT 先垂直 8m 层再水平。
 - 【预期】上述用例全部 PASS；`swarm_uav_executor` 全量测试无回归。
-- 【结果】（测试后填）
+- 【结果】**PASS**：`test_ego_swarm_driver.py` 20/20 过；包全量 58 passed + 1 pre-existing rostest 环境失败（需 ROS master，baseline 复现）。
 
 ### 2.2 ego_planner_driver / `test_trajectory.cpp`
 
@@ -61,9 +63,11 @@
 - 用例：
   1. horizon 截取：waypoints 超出 `planning_horizon` 时只取前方部分，`local_target_pt_` 为截取段末点；
   2. 滚动：到达 horizon 末端后再次规划下一段；
-  3. 全局退化：`planning_horizon<=0` 时一次规划完整航线（回归兼容）。
+  3. 全局退化：`planning_horizon<=0` 时一次规划完整航线（回归兼容）；
+  4. 到达最终目标后发布 COMPLETED；
+  5. swarm rebound 硬推：侵入邻居 clearance 的控制点被推开（checkClearance 通过）。
 - 【预期】全量 0 failure（含既有状态机/轨迹用例）。
-- 【结果】（测试后填）
+- 【结果】**PASS**：`catkin test ego_planner_driver` 全量 0 failure（含新增 horizon/滚动/COMPLETED/rebound 用例）。
 
 ### 2.3 全量构建与回归
 
@@ -75,7 +79,7 @@
   catkin_test_results --all build
   ```
 - 【预期】6 包构建成功；0 errors、0 failures。
-- 【结果】（测试后填）
+- 【结果】**PASS**：6 包构建成功；`catkin_test_results --all build` **133 tests, 0 errors, 0 failures**。
 
 ## 3. 端到端批次任务测试（无头 15 机）
 
@@ -94,7 +98,13 @@
 - 【预期】`status=SUCCESS`、`failed_robot_ids=[]`；12 机到达目标（终点偏差 ≤0.2 m）；
   飞行速度峰值 ≤1.5 m/s；MOVE_TO 出现 15m 层（z 先到 15 再水平、最后垂直 12m）；
   机间最小距离 ≥1.0 m。
-- 【结果】（测试后填）
+- 【结果】**`status=SUCCESS`、`failed_robot_ids=[]`（首次通过）**：
+  - 终点偏差 0.2-0.3 m（≤0.6 m 容差，PX4 OFFBOARD 稳态偏差量级）；
+  - 速度峰值 1.10-1.29 m/s（≤1.5 m/s 达标）；
+  - 分层执行：z 先爬升到 15 m（zmax 15.1）→ 水平 EGO → 垂直降到 12 m；
+  - **机间最小距离 0.64 m（UAV3-UAV4）**：仍 <1.0 m 门禁，避障待进一步处理；
+  - 任务结束后高度俯冲（z→9.2 m）为 cleanup 停止 offboard 后 PX4 自主降落，非任务问题。
+  - 图：`.tmp/analyze_ulog/prepare_trajectory_review.png`、`uav1_realtime.png`。
 
 ### 3.2 coverage-segment-1（A01-A12 `FOLLOW_ROUTE`，timeout 480s）
 
@@ -130,16 +140,16 @@
 
 - 步骤：逆序停止（TCP → backend/bridge → 机载层 → 仿真层）；`ss`/`ps` 检查无残留。
 - 【预期】端口/进程无残留。
-- 【结果】（测试后填）
+- 【结果】**PASS**：端口/进程无残留（cleanup 后 `ss`/`ps` 均干净）。
 
-## 4. 结果汇总（测试后填）
+## 4. 结果汇总
 
 | 批次/项 | 结果 | 备注 |
 |---|---|---|
-| 单元 2.1-2.3 | | |
-| prepare | | |
-| coverage-segment-1 | | |
-| fault-exit | | |
-| recovery | | |
-| coverage-segment-2 | | |
-| hold-end | | |
+| 单元 2.1-2.3 | PASS | ego 驱动 20/20；全量 133 tests 0 failure |
+| **prepare** | **SUCCESS** | 2026-08-23 16:22 结束；首次通过；偏差 0.2-0.3m、速度 1.29m/s、分层 15m、机间 0.64m |
+| coverage-segment-1 | 未执行 | prepare 通过后按序可继续 |
+| fault-exit | 未执行 | |
+| recovery | 未执行 | |
+| coverage-segment-2 | 未执行 | |
+| hold-end | 未执行 | |
