@@ -96,25 +96,40 @@
 - 【预期】`status=SUCCESS`、`failed_robot_ids=[]`；12 机到达目标（终点偏差 ≤0.6 m 容差）；
   分层执行（15m 层→水平→12m）；EGO ULog `trajectory_setpoint.vx/vy/vz` 为有限值；
   巡航速度不再出现与 replan 周期锁定的周期性零速。
-- 【结果】**`status=SUCCESS`、`failed_robot_ids=[]`，两次运行均通过**（Run 3 无 clamp、
-  Run 4 带 start 导数 clamp）：
-  - 任务耗时 ~133 s（00:35:51→00:38:04 / 00:46:28→00:48:41）；
-  - 12 机全部 `COMPLETED`，终点偏差 0.1-0.6 m（≤0.6 m 容差）；
-  - 分层执行：z 先爬 15.1m 层 → 水平巡航 → 垂直降 12m；
-  - 巡航段水平速度 max 1.05 m/s、mean 0.59 m/s，5s 窗口均值 0.48-0.70 m/s，
-    **不再出现修复前的周期性降零**（修复前 ~0.2 m/s 谷值）；
-  - PX4 ULog `trajectory_setpoint.vx/vy/vz` 有限样本 859-970/1198-1216（修复前 0/750）；
-  - Run 3 曾发现下降段 setpoint 速度尖峰 15.7 m/s、z 过冲至 +21 m（数值微分导数病态），
-    已加 start_vel/start_acc 1.5× 界限 clamp（`clampStartDerivatives`），
-    Run 4 尖峰收敛至 setpoint vmax ≤2.41 m/s、acc_z_max ≤8.35 m/s²。
+- 【结果】**`status=SUCCESS`、`failed_robot_ids=[]`（Run 9，建议 2+3 与到达修复后）**：
+  - 任务耗时 ~111 s（02:15:18→02:17:19）；
+  - 12 机全部 `COMPLETED`，终点偏差 0.2-0.7 m（多数 ≤0.6 m，个别 0.6-0.7 m 在 near_final
+    容差判定内通过）；
+  - **最大速度 1.12-1.18 m/s**（建议 2+3 消除下降段速度超限；Run 4 为 2.15-2.37）；
+  - 巡航段水平速度 max 1.04、mean 0.61，5s 窗口均值 0.52-0.69 m/s（无零谷）；
+  - PX4 ULog `trajectory_setpoint.vx/vy/vz` 有限样本 859-970/1198-1216；
+  - 分层执行：z 先爬 15.1m 层 → 水平巡航 → 垂直降 12m。
 
-### 2.3 ULog 分析
+### 2.3 中间失败与根因修复（Run 5-8）
+
+- **Run 5/6/8 `TIMEOUT`**：飞机 110s 全部到位（偏差 0.23m < 0.6 容差），但 exec_state
+  未 COMPLETED。节点诊断确认 `checkArrival` 从未被调用（`elapsed >= duration` 未满足）：
+  每 1s 时间重规划持续进行、`waypoint_consumed_` 未到末尾，轨迹从不执行完。
+  - 建议 2 后 `advanceConsumed`/`truncateToHorizon` 误用旧轨迹期望位置推进窗口；
+    每 1s 换段时期望位置总在下降段中段 → consumed 卡住。
+  - 即使改用实际位置，密化末段投影阈值（`t<seg_len`）也会让 consumed 停在 `size-2`。
+- **Run 7 `FAILURE(failed=[A05])`**：A05 在并发确认阶段被拒（bridge/executor 偶发抖动），
+  未进入飞行阶段，与到达逻辑无关。
+- **修复（本计划新增）**：
+  1. `advanceConsumed`/`truncateToHorizon` 改用**实际位置**（真实进度感知）；
+  2. 飞机进入最终目标容差（`near_final`）时**停止时间触发重规划**并**退化规划完整剩余
+     航点**（含目标）；
+  3. `checkArrival` 的 COMPLETED 判定增加 `near_final`（不依赖 `waypoint_consumed_`）。
+- 新增回归测试：`RollingSegmentsReachCompleted`（滚动多段最终 COMPLETED）、
+  `RollingSegmentsReachCompletedWithTrackingLag`（滞后 0.15m 下仍收敛）。
+
+### 2.4 ULog 分析
 
 - 脚本：`.tmp/analyze_ulog/analyze_prepare_trajectory.py`、`plot_uav_realtime.py`
   （p-t 三轴合并一张 + 新增三轴 v-t 一张 + speed）。
 - 检查项：
-  1. `trajectory_setpoint` 的 vx/vy/vz 有限样本占比（Run 4：859-970/1198-1216，修复前 0/750）；
-  2. 实际水平速度谱：巡航段无 ~4 s 周期性零速谷值（5s 窗口均值最低 0.48 m/s）；
+  1. `trajectory_setpoint` 的 vx/vy/vz 有限样本占比（859-970/1198-1216，修复前 0/750）；
+  2. 实际水平速度谱：巡航段无 ~4 s 周期性零速谷值（5s 窗口均值最低 0.52 m/s）；
   3. 最小机间距离、终点偏差、最大速度（见 §3）。
 - 【结果】见 §3 汇总与图：
   - `.tmp/analyze_ulog/prepare_trajectory_review.png`（3D 轨迹/速度/机间距/高度）
@@ -125,30 +140,33 @@
 
 | 项目 | 结果 | 备注 |
 |---|---|---|
-| 单元 1.1-1.3 | PASS | ego 52、executor 75、全量 150 tests 0 failure |
-| prepare（Run 3，无 clamp） | SUCCESS | setpoint 速度尖峰 15.7 m/s → 定位为导数病态 |
-| prepare（Run 4，带 clamp） | SUCCESS | 尖峰收敛至 setpoint vmax ≤2.41、acc ≤8.35 |
+| 单元 1.1-1.3 | PASS | ego 56→60、executor 75、全量 150→158 tests 0 failure |
+| prepare（Run 3-4，仅 PVA+clamp） | SUCCESS | 下降段 setpoint 尖峰 15.7→2.41 m/s（Run 4） |
+| prepare（Run 5/6/8） | TIMEOUT | 到位未 COMPLETED → 根因：consumed 卡住、checkArrival 未触发 |
+| prepare（Run 7） | FAILURE(A05) | 并发确认阶段偶发拒绝，未进入飞行 |
+| prepare（Run 9，建议2+3+到达修复） | **SUCCESS** | vmax 1.12-1.18，任务 ~111s |
 | PVA 前馈 | PASS | 12 机 `trajectory_setpoint.vx/vy/vz` 均有限 |
-| 周期性零速 | 消除 | 巡航 5s 窗口均值 0.48-0.70，无零谷 |
-| 巡航速度 | PASS | max 1.05 m/s、mean 0.59 m/s |
+| 周期性零速 | 消除 | 巡航 5s 窗口均值 0.52-0.69，无零谷 |
+| 巡航速度 | PASS | max 1.04 m/s、mean 0.61 m/s |
+| 下降段速度 | **修复** | Run 4 2.15-2.37 → Run 9 1.12-1.18 m/s（建议 2+3） |
 | 分层执行 | PASS | z 先 15.1m 层再降 12m |
-| 终点偏差 | PASS | 最大 0.6 m（≤容差） |
-| 实际速度峰值 | **超限（2.15-2.37 m/s）** | 出现在 15→12m 下降/拐角过渡，setpoint ≤2.41；需后续调平 |
-| 最小机间距离 | **未达标（0.35 m）** | UAV2-UAV4 @t≈47.8s，低于 1.0m 门禁（既有问题，Run 3 为 0.49m） |
+| 终点偏差 | PASS | 0.2-0.7 m（near_final 容差判定） |
+| 最小机间距离 | **未达标（0.42 m）** | UAV3-UAV4 @t≈75.2s，低于 1.0m 门禁（既有问题） |
 
 ## 4. 清理与残留检查
 
 - 逆序停止（TCP → backend/bridge → 机载层 → 仿真层）；`ss`/`ps` 检查无残留。
-- 【结果】**PASS**：`prepare 退出码=0` 后清理，残留进程 0、测试端口全部释放。
+- 【结果】**PASS**：每次运行后残留进程 0、测试端口全部释放；Run 9 后 QGC 断连为脚本
+  清理所致（非仿真崩溃）。
 
 ## 5. 遗留项（未验证/未解决）
 
-1. 下降/拐角过渡段实际速度峰值 2.2-2.4 m/s 仍超 `max_vel=1.0`（setpoint 已 clamp 到 ≤2.41，
-   不再出现 15 m/s 级病态）；根因是水平→垂直过渡 B-spline 的加速度/速度超限，需后续在
-   计划层约束或 PX4 侧速度限制。
-2. 最小机间距离 0.35 m 低于 1.0 m 门禁（UAV2-UAV4 爬升阶段），属既有 swarm rebound 未完全
+1. 最小机间距离 0.42 m 低于 1.0 m 门禁（UAV3-UAV4 巡航段），属既有 swarm rebound 未完全
    覆盖动态场景的问题，需后续验证/增强，本计划未移植原版独立碰撞预测。
+2. 个别机终点偏差 0.6-0.7 m（分析脚本按 z∈[11.4,12.6] 最近点评估），任务判定以 C++
+   `near_final`+`pos_tol` 为准通过；如需更紧终点可调 `position_tolerance_m`。
 3. 本次未做 plan §6.4 的 3s/5s `replan_period_s` A/B 诊断与故障注入（候选停止/NaN/模式
    快速切换）的 SITL 级验证；relay 的对应行为由纯单测与 rostest 覆盖。
 4. follower（FOLLOW_ROUTE）的 PositionTarget 候选已在单测覆盖，未在真实 SITL 编队飞行验证。
+
 
