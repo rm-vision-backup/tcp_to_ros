@@ -78,7 +78,7 @@
 ### 2.1 环境与起飞
 
 - 仿真层：`multi_uav_ego_15sim.launch gui:=false`（11300/11345）。
-- 机载层：`startup_offboard_ego.sh 1..15`（11311..11325，日志改到 `.tmp/`）。
+- 机载层：`startup_offboard_ego.sh 1..15`（11311..11325，日志/pid 写到 `.tmp/logs/`）。
 - GCS_A：bridge + backend + TCP（11310 / 39001），标定 ready 15/15。
 - 起飞：`offboard_takeoff_15.py` 15/15 `armed=True / mode=OFFBOARD`，软起飞 z≈5m。
 - 【结果】**PASS**（两次运行 15/15 起飞成功；`/mavros/setpoint_raw/local` 稳定 30.009 Hz，
