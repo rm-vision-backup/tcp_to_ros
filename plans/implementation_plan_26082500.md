@@ -2,7 +2,7 @@
 
 日期：2026-08-25 00:57
 
-状态：**实施中（阶段 A 已完成；阶段 B–E 待实施）**
+状态：**实施中（阶段 A–B 自动测试完成；阶段 C–E 待实施）**
 
 ## 1. 目标与成功判据
 
@@ -233,7 +233,9 @@ commit-lock hard-clearance 已共用单一事务，因此未额外抽取重复�
 
 ### 阶段 B：受约束紧急制动闭环
 
-状态：**待实施**。
+状态：**自动测试完成（2026-08-25），SITL/延迟闭环待阶段 E 验收**。新增五次多项式制动生成器、
+动力学 validator、active emergency 抢占、safety generation 晚到提交隔离及制动终点 `BRAKE_HOLD`。
+生产仍默认 shadow；旧 1m 门禁保留。制动生成异常会中止 nominal 并降级 HOLD，同时记录高优先告警。
 
 - 新增 `EmergencyBrakeGenerator`，从同一时刻 P/V/A 生成受约束停车轨迹；
 - node 增加 `WARNING`、`EMERGENCY_BRAKE`、`BRAKE_HOLD` 内部状态；对外 `exec_state` 如需新增字符串，

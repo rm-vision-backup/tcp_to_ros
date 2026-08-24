@@ -80,7 +80,7 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
-| B：受约束紧急制动 | 待实施 | — |
+| B：受约束紧急制动 | 自动测试完成，SITL 待验收 | ego 104 tests；executor 专项 24 passed |
 | C：tentative intent 屏障 | 待实施 | — |
 | D：确定性四候选让路 | 待实施 | — |
 | 双节点动力学闭环 | 待执行 | — |
@@ -92,3 +92,16 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 
 阶段 A 未运行 PX4 SITL，故未生成新 ULog，不覆盖 `.tmp/analyze_ulog` 现有图片。首次 SITL 后使用
 工作区 `.tmp/analyze_ulog/` 脚本按公共 PX4 时间轴重绘，并在本节登记图片、ULog 和场景参数。
+
+## 5. 阶段 B 自动测试
+
+- `EmergencyBrakeGenerator` 覆盖 0/0.2/1.0/1.5m/s、不同方向、非零起始加速度、NaN 和超速拒绝；
+- 生成轨迹严格检查 P/V/A 起终点、速度、加速度、jerk、finite 和时间单调；
+- active 状态机回归覆盖 `EMERGENCY_BRAKE → BRAKE_HOLD`、终点锁存与 HOLD mask；
+- executor 覆盖 braking 中间态不终止、`BRAKE_HOLD` 失败收口；
+- `ego_planner_driver`：**104 tests，0 failure**；`test_ego_swarm_driver.py`：**24 passed**。
+- 阶段 B 相关包全量：executor **83 tests**；`catkin_test_results --all build`：
+  **214 tests，0 errors，0 failures**。
+
+限制：未完成带 200–800ms intent 延迟、控制滞后和滑行的闭环；生产 launch 保持 shadow；旧 1m
+执行层门禁保留。生成器异常 fallback HOLD 仅作为“不继续 nominal”底线，不算受约束制动成功证据。
