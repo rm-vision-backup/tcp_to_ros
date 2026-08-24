@@ -77,6 +77,7 @@ GCS_A 必须：
 | `implementation_plan_26082300.md` | 方案 B：机载分层航点 + C++ `planning_horizon` 滚动局部规划 | 已实施（prepare 通过；避碰未验收） |
 | `implementation_plan_26082322.md` | 周期性零速修复：PositionTarget 分源 + relay 唯一出口、仲裁与失效 HOLD | 已实施（2026-08-24） |
 | `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
+| `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **待实施** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -115,6 +116,10 @@ GCS_A 必须：
   多轮互惠收敛未通过。`enable_rebound` 因此继续默认 false，生产兜底仍是执行层距离门禁 HOLD，
   禁止仅恢复开关作为主动避碰完成证据。最终全量结果为 186 tests、0 failure（含生产 EGO launch
   展开后的 `enable_rebound=false` runtime rostest，以及 TCP listener 早绑定/端口策略回归）。
+- **主动避碰增强计划（2026-08-25 待实施）**：按 `implementation_plan_26082500.md` 先以 shadow 模式
+  增加 20–30Hz 预测监督与诊断，再依次实现受约束紧急制动、最多 1s tentative intent 协商窗口、
+  数字 ID right-of-way 和左/右/减速/加速四候选。缺失邻机默认不阻启动，旧 1m 门禁仅在全部延迟/
+  惯性 A/B 验收通过后才可独立删除。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
@@ -125,6 +130,7 @@ GCS_A 必须：
 | 路径 | 内容 |
 |---|---|
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
+| `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（待实施） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `docs/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
