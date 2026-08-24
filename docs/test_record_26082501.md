@@ -81,7 +81,7 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 | 阶段 | 状态 | 证据 |
 |---|---|---|
 | B：受约束紧急制动 | 自动测试完成，SITL 待验收 | ego 104 tests；executor 专项 24 passed |
-| C：tentative intent 屏障 | 待实施 | — |
+| C：tentative intent 屏障 | 自动测试完成，延迟闭环待验收 | ego 110 tests；bridge phase roundtrip |
 | D：确定性四候选让路 | 待实施 | — |
 | 双节点动力学闭环 | 待执行 | — |
 | PX4 SITL 单/双/三机 | 待执行 | — |
@@ -105,3 +105,11 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 
 限制：未完成带 200–800ms intent 延迟、控制滞后和滑行的闭环；生产 launch 保持 shadow；旧 1m
 执行层门禁保留。生成器异常 fallback HOLD 仅作为“不继续 nominal”底线，不算受约束制动成功证据。
+
+## 6. 阶段 C 自动测试
+
+- 协议 2.0 新增 tentative/active/braking phase；ROS MD5=`51d6d6b8b7a8257c1ccc5ed69b8ef73f`；
+- 覆盖 tentative 无 setpoint、1s 超时缺失不阻塞、新 intent 触发重算、非法 phase 拒绝、1.0 旧语义；
+- bridge 使用原生 ROS bytes 透传，新增三种 phase serialize/deserialize roundtrip；
+- `ego_planner_driver`：**110 tests，0 failure**；全工作区结果 **221 tests，0 errors，0 failures**。
+  双节点 100–1200ms 延迟/乱序/丢失尚未执行。

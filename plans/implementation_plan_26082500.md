@@ -2,7 +2,7 @@
 
 日期：2026-08-25 00:57
 
-状态：**实施中（阶段 A–B 自动测试完成；阶段 C–E 待实施）**
+状态：**实施中（阶段 A–C 自动测试完成；阶段 D–E 待实施）**
 
 ## 1. 目标与成功判据
 
@@ -249,6 +249,10 @@ commit-lock hard-clearance 已共用单一事务，因此未额外抽取重复�
 200–800ms intent 延迟、控制延迟和位置跟踪惯性后，紧急制动轨迹连续且不超动力学限制。
 
 ### 阶段 C：tentative intent 与最多 1s 协商窗口
+
+状态：**自动测试完成（2026-08-25），双节点延迟闭环待验收**。协议 2.0 phase、tentative 不执行、
+新 intent 重算、1s 缺失不阻塞和激活时最终复验已落地。ROS1 MD5 已变化，部署须同批重建全部消费者；
+协议 1.0 数据只按 ACTIVE 旧语义接受，不承诺旧二进制连接兼容。
 
 - 扩展 `swarm_uav_interfaces/UavTrajectoryIntent.msg` 表达 tentative/active/braking phase；
 - 同步修改消息生成、桥接序列化测试、拓扑 smoke 和旧版本兼容测试；
