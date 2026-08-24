@@ -2,7 +2,7 @@
 
 日期：2026-08-25 00:57
 
-状态：**待实施**
+状态：**实施中（阶段 A 已完成；阶段 B–E 待实施）**
 
 ## 1. 目标与成功判据
 
@@ -211,6 +211,11 @@ A/B 后，才允许把 `brake_if_closing` 设为实验默认；`brake_always` �
 
 ### 阶段 A：预测数学、身份和日志基础（不改变飞行行为）
 
+状态：**已完成（2026-08-25）**。实现与验证见
+`docs/test_record_26082501.md`。现有 `replanLoop()` 只调 `replanOnce()`，候选生成、激活时重基准和
+commit-lock hard-clearance 已共用单一事务，因此未额外抽取重复实体。生产 launch 默认 25Hz shadow；
+库内直接构造默认 off，避免单测隐式文件 IO。误配 active 会告警并降级 shadow，阶段 B 前不改变行为。
+
 修改 `src/ego_planner_driver`：
 
 - 新增纯 C++ `SafetyPredictor`：同步采样、相对状态、CPA/TTC、动态门槛和判级；
@@ -227,6 +232,8 @@ A/B 后，才允许把 `brake_if_closing` 设为实验默认；`brake_always` �
 与基线一致；日志不造成 safety tick 超期。
 
 ### 阶段 B：受约束紧急制动闭环
+
+状态：**待实施**。
 
 - 新增 `EmergencyBrakeGenerator`，从同一时刻 P/V/A 生成受约束停车轨迹；
 - node 增加 `WARNING`、`EMERGENCY_BRAKE`、`BRAKE_HOLD` 内部状态；对外 `exec_state` 如需新增字符串，
