@@ -1,11 +1,8 @@
 # plans 目录（入口）
 
 > 本目录是 `tcp_to_ros` 项目的开发入口：维护 **Phase 编号约定**、**全局设计规约**、
-> **冻结实施计划**与**开发里程碑**。新会话从此文件开始阅读。
->
-> 场景操作手册：`docs/test_record_26081021.md`（场景 1/2/2+）与
-> `docs/test_record_26081123.md`（场景 3 无头 15 机）。
-> 测试证据按期归档：`docs/test_record_2608xxxx.md`（含早期 `docs/tcp_to_ros_测试记录_早期.md`）。
+> **实施计划**与**当前状态**。新会话从此文件开始阅读。
+> 测试证据按期归档：`docs/test_record_2608xxxx.md`。
 
 ## Phase 编号约定（唯一权威）
 
@@ -23,8 +20,6 @@
 ## 全局设计规约（冻结）
 
 ### 跨机通信方案
-
-经研讨比较单纯 Topic / 跨机 Service / 跨机 Action / 现有多 Master 框架后冻结：
 
 采用 **GCS 本地 Action + 跨机 Service + 跨机 Topic**：
 
@@ -75,113 +70,54 @@ GCS_A 必须：
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前不得上桨。
 - 无 RC 的 PX4 SITL 需设 `COM_RCL_EXCEPT=4` + `NAV_RCL_ACT=0`，并**先切 OFFBOARD 再 arm**。
 
-## 实施计划（历史 + 进行中）
+## 实施计划（现存）
 
 | 文件 | 内容 | 状态 |
 |---|---|---|
-| `implementation_plan_26080804.md` | Phase 4：共享接口迁移 + executor + `MOVE_TO/HOLD`（mock/direct MAVROS） | 已实施 |
-| `implementation_plan_26080900.md` | Phase 5：跨 Master 链路健康 + 飞行安全租约 + 故障注入 | 已实施 |
-| `implementation_plan_26081003.md` | P1：ego_planner_driver 轨迹内核 + 机间避碰集成 | 已实施 |
-| `implementation_plan_26081023.md` | 四种动作命令（MOVE_TO/FOLLOW_ROUTE/FAULT_EXIT/HOVER）补齐 | 已实施 |
-| `implementation_plan_26081202.md` | ego_planner_driver 状态机修复 + IDLE setpoint 流 + GCS_A 全局原点统一 | **已实施** |
-| `implementation_plan_26081223.md` | 冻结集群坐标、固定编队、两阶段启动、按需起飞与分层轨迹 | **已实施** |
-| `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **已实施** |
-| `implementation_plan_26082300.md` | 方案 B：机载分层航点 0.4m 密化 + C++ `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm） | **部分实施（核心代码与 prepare 已完成；避碰及其余批次未验收）** |
-| `implementation_plan_26082322.md` | 周期性零速修复：EGO/follower 分源 `PositionTarget` + relay 唯一出口、仲裁与失效 HOLD | **已实施（2026-08-24，含 prepare 无头验收）** |
-| `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑（`one_segment_traj_gen`）+ 双机不安全时本机 HOLD 暂停（备用多段 minSnapTraj 仅记录、不实施） | **待实施** |
+| `implementation_plan_26082300.md` | 方案 B：机载分层航点 + C++ `planning_horizon` 滚动局部规划 | 已实施（prepare 通过；避碰未验收） |
+| `implementation_plan_26082322.md` | 周期性零速修复：PositionTarget 分源 + relay 唯一出口、仲裁与失效 HOLD | 已实施（2026-08-24） |
+| `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
 
-> 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
->
-> `implementation_plan_26081202.md` 为**已实施计划**（2026-08-12）：修复场景 3 测试暴露的 ego
-> 状态机缺陷（IDLE 不发布 setpoint、COMPLETED/HOLD 不复位 IDLE、多机坐标系不一致），
-> 并配套了当时的固定原点方案。该固定原点和旧自动 TAKEOFF 语义已由
-> `implementation_plan_26081223.md` 的冻结标定与 executor 按需起飞取代。
-
-## 开发里程碑
-
-| Phase | 里程碑 | 证据 |
-|---|---|---|
-| 1 | 接口与映射冻结（msg/srv/YAML） | `docs/tcp_to_ros_测试记录_早期.md` |
-| 2 | GCS_A 分发与汇总（Action + 聚合 + 失败即停 + HOLD） | `docs/tcp_to_ros_测试记录_早期.md` |
-| 3 | bridge 扩展（Topic 限频修正 + 通用 Service 代理） | `docs/tcp_to_ros_测试记录_早期.md` |
-| 4 | executor 首版 + 三机 PX4 SITL 主动飞行（2026-08-08） | `docs/tcp_to_ros_测试记录_早期.md` |
-| 5 | 跨 Master 通信安全闭环（mock 断链 2026-08-09；真实 MAVROS/PX4 租约断链 + 安全 END 2026-08-10） | `docs/tcp_to_ros_测试记录_早期.md` |
-| 5 | 四种动作命令实现 + 场景 2+ 15 mock 验收（2026-08-11 15:00） | `docs/test_record_26081115.md` |
-| 5 | 场景 3 无头 15 机多 Master 端到端（2026-08-11 23:58） | `docs/test_record_26081123.md` |
-| 5 | ego_planner_driver 状态机修复（2026-08-12 已实施：IDLE setpoint 流 + terminal→IDLE 自动回退 + GCS_A 全局原点统一） | `plans/implementation_plan_26081202.md` |
-| 5 | 冻结坐标与固定编队、PREPARE/START、按需起飞、15/12/8m 分层动作（2026-08-13） | `plans/implementation_plan_26081223.md`、`docs/test_record_26081300.md` |
-| 6 | 实机联调（不上桨 → 上桨） | 未执行 |
+> 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
+> 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
 
 ## 当前状态（实时）
 
 - **已落地**：A01-A12 全员原点/航向门禁、A01-A15 原点回读确认、任务右-前-上变换、固定编队
   1/2 精确集合、内部 PREPARE/START/ABORT、executor 按需起飞、15/12/8m 分层动作、followers PI、
-  EGO 硬 clearance 与垂直/PI 实时距离门禁。
-- **起飞所有权**：`safe_valley_exp/scripts/offboard_takeoff_15.py` 仅做只读诊断；正式 arm、OFFBOARD、
-  相对 5m 检查点和稳定 2s 都由 executor 在未 arm `MOVE_TO` 的 START 后执行。
+  EGO 硬 clearance 与垂直/PI 实时距离门禁、EGO 巡航运行时距离门禁（水平<1.0m 且垂直<2.0m → 本机 HOLD）。
 - **坐标冻结**：A01-A12 连续采样 2s 后逐机求全球位置中位数和圆周平均航向，任一缺失、已 arm 或
   航向偏差超过 30° 均拒绝；冻结值在 GCS_A 进程内不变。15/15 原点回读达到水平/高度 0.1m 才就绪。
-- **验证**：2026-08-13 工作空间 `catkin build` 6/6 成功，`catkin test`/`catkin_test_results --all build`
-  合计 133 tests、0 errors、0 failures；包含 executor ROS Service/Topic rostest。
-- **场景 3 批 1 结论（2026-08-12 晚）**：`prepare` FAILURE（5/12）且全机未动。
-  根因=GCS_A backend `_execute()` 的 fail-fast 预检（`UAV_LINK_UNHEALTHY`）：任务前多机
-  MAVROS heartbeat 曾 SUSPECT/LOST，`is_stably_healthy` 不满足 → 整组 set_aborted，
-  **从未调用任何 `/UAV{n}/uav_task`、未触 HOLD**；executor 无任务记录、exec_state 均回 IDLE。
-- **链路健康修复（2026-08-12 晚）**：① link_health 新增 `is_healthy_or_undiscovered`，
-  UNDISCOVERED 不阻任务；② backend 预检替换为该方法，并新增前置等待（最多 10s，每秒重评）；
-  ③ 放宽 heartbeat 阈值（suspect 3→10s、lost 5→15s）以便容忍 bridge 建链初期抖动；
-  ④ `ego_swarm.state_timeout_s` 从 5s 放宽到 200s 避免长轨迹规划被 driver 误判超时。
+- **链路健康（2026-08-12 晚修复）**：`link_health` + `safe_hold` 承担节点丢失 → 停止 → 全悬停 → 手动接管；
+  `is_healthy_or_undiscovered` 不阻任务，heartbeat 阈值 suspect 10s / lost 15s，`ego_swarm.state_timeout_s=200`。
+- **lease 已删除（2026-08-14）**：lease 时延敏感（renew 0.9s）且实机自组网必失败，按
+  `implementation_plan_26081406.md` 删除，由 `link_health` + `safe_hold` 替代；`UavSafetyLease.srv` 保留为 dead definition。
+- **方案 B（2026-08-23）**：`EgoSwarmDriver` 分层关键点 + `planning_horizon`(5m) 滚动窗口、
+  滚动段继承 vel/acc、到达发布 COMPLETED、位置容差 0.6m；prepare 无头验收 SUCCESS（12/12 COMPLETED，
+  速度峰值 1.05-1.12m/s）。
+- **26082322（2026-08-24）**：EGO 发 P/V/A/yaw PositionTarget(mask 2048)、follower mask 2496、
+  `setpoint_relay` 独占 `/mavros/setpoint_raw/local`（选源/generation/freshness/finite 校验、固定 HOLD）；
+  `replan_period_s=1.0`。详见 `docs/test_record_26082400.md`。
+- **min-snap 统一单段重构（2026-08-24 已实施）**：上层 keypoints 最大 2m 密化（仅窗口推进/末点参考，
+  不进 B-spline）；C++ `planOnce` 用 `one_segment_traj_gen` 单段（起点=旧轨迹 P/V/A、end_vel=切线巡航、
+  最终段静止、梯形 T）→ 0.4m 弧长采样 point_set → `parameterizeToBspline` → L-BFGS（jerk+feasibility）；
+  默认停用 `enable_rebound`/`enable_time_reparam`；执行层 EGO 巡航距离门禁扩展 `_distance_safe`；
+  `replan_period_s=1.0`、PositionTarget 契约不回归。多段 `minSnapTraj` 为备用方案（仅记录不实施）。
+- **验证进展**：全量 `catkin_test_results --all build` 166 tests 0 failure。多次 15 机无头 prepare
+  因机间接近（如 UAV3-UAV5 0.85m）触发距离门禁 HOLD 而整组 FAILURE，符合"双机不安全即 HOLD"预期；
+  单机 MOVE_TO 独立飞行验证进行中。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
-  `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast。
-- **lease 删除决策（2026-08-14）**：`prepare` 多次失败根因集中在 safety lease
-  （`LEASE_START_FAILED` / `LEASE_EPOCH_CONFLICT` / `LEASE_EXPIRED` latch）；lease 时延敏感
-  （renew deadline 0.9s）且实机自组网电台（200-800ms 抖动）下必然失败，决定按
-  `implementation_plan_26081406.md` 删除 lease 层，由 `link_health` + `safe_hold` 承担
-  “节点丢失 → 停止 → 全悬停 → 手动接管”。
-- **lease 删除已实施（2026-08-14）**：机载 `safety_lease.py`、watchdog 线程、lease 服务与
-  `lease_guard` 门禁、driver `can_end_safety_lease`、GCS `SafetyLeaseCoordinator`、桥接拓扑
-  `uav_safety_lease` 条目、验收 launch 参数与 verification 验证脚本全部移除；
-  `UavSafetyLease.srv` 保留为 dead definition。`catkin build` 3/3 通过；GCS 22 项单元测试全过，
-  机载 51 项中 49 过 + 2 项 pre-existing FakeRos 环境失败（baseline 复现）。待无头仿真重跑六批次。
-- **方案 B 已实施部分（2026-08-23）**：`implementation_plan_26082300.md` 的核心代码与补充修复已落地：
-  `EgoSwarmDriver` 生成含 start 的 15/12/8m 分层关键点并按最大 0.4m 间距密化；C++ 移除全局密化，
-  使用 5m `planning_horizon`、周期重规划和按实际位置推进的滚动窗口；滚动段继承 vel/acc，最终到达
-  发布 `COMPLETED`，位置容差调整为 0.6m；邻机 swarm rebound 硬推已接入。相关 Python/C++ 用例已补齐，
-  当次记录为 6 包构建成功、133 tests、0 errors、0 failures（详见 `docs/test_record_26082300.md`）。
-- **方案 B prepare 验收结果**：无头 15 机环境中 A01-A12 `prepare` 已 `SUCCESS`，12 机全部
-  `COMPLETED`；完成 15m→水平→12m 分层，终点偏差 0.2-0.3m，速度峰值 1.05-1.12m/s。
-- **方案 B 未完成部分**：prepare 实测机间最小距离曾为 0.64m，未达到 ≥1.0m 安全门禁；
-  `coverage-segment-1`、`fault-exit`、`recovery`、`coverage-segment-2`、`hold-end` 尚未执行，
-  Phase 6 实机验收也未执行。当前 `ego_planner_driver` 工作树另有未提交的速度平滑改动，不能视为
-  已归档实施结果；周期性速度降零问题转由 `implementation_plan_26082322.md` 继续处理。
-- **26082322 已实施（2026-08-24）**：EGO 改发 P/V/A/yaw `PositionTarget`（mask 2048）、follower
-  改发显式 position/velocity/yaw 候选（mask 2496）、`setpoint_relay` 独占
-  `/mavros/setpoint_raw/local` 并实现选源/generation 隔离/freshness/finite 校验/固定位置 HOLD，
-  `replan_period_s` 恢复为 1.0 s；旧 `/setpoint` PoseStamped 链路与旁路发布已清理。详见
-  `docs/test_record_26082400.md`。
-- **min-snap 统一单段方案已登记（2026-08-24 15:52，`implementation_plan_26082415.md`，待实施）**：
-  成功判据=单机飞行平滑（速度无剧烈震荡）+ 双机不安全时 HOLD 暂停；本次不实施机间避碰行为，
-  未完成任务即 HOLD 作为避碰失败兜底，也不实施原版 2.1 完整安全机制。数据链：上层 keypoints
-  密化 0.4m→**2m**（仅作窗口推进/末点参考，不进 B-spline）；C++ `planOnce` 引入原版 min-snap
-  单段 `one_segment_traj_gen`（起点=旧轨迹 P/V/A、end_vel=切线巡航、仅最终段静止、梯形 T）→
-  0.4m 弧长等距采样 point_set → `parameterizeToBspline` → L-BFGS（jerk + feasibility 软惩罚）；
-  停用 rebound 硬推与时间重参数化（新增 `enable_rebound`/`enable_time_reparam` 默认 false）；
-  执行层 EGO 巡航距离门禁扩展 `_distance_safe`（复用 `neighbor_odom_topics`，水平 <1.0m 且垂直
-  <2.0m → 本机 HOLD 暂停）；`replan_period_s` 保持 1.0、PositionTarget 契约与 relay 唯一出口不回归。
-  备用多段 `minSnapTraj` 方案已写入计划（含触发条件与闭式解实现），**仅记录不实施**——它是单段
-  无法处理时的修改方案，非弓字 keypoints 后续功能；当前单段方案覆盖 MOVE_TO 与 FOLLOW_ROUTE。
-
+  `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
+  UAV 逐机串行启动耗时较长，一机 roslaunch 偶发崩溃需逐机独立启动并补充轮。
 
 ## 文档索引
 
 | 路径 | 内容 |
 |---|---|
-| `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、里程碑、当前状态 |
-| `plans/implementation_plan_*.md` | 实施计划（历史冻结 + 进行中） |
+| `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
+| `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
+| `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
+| `docs/test_record_26082300.md` / `26082400.md` | 方案 B prepare / PVA 链路测试记录 |
 | `CONTEXT.md` | 领域词汇表 |
-| `docs/tcp_to_ros_工程过程.md` | 开发日志（含各阶段 bug 修复记录） |
-| `docs/tcp_to_ros_测试记录_早期.md` | 早期 mock 闭环测试证据（已冻结，不再更新） |
-| `docs/test_record_26081021.md` | 场景 1/2/2+ 操作手册 + 历史测试结果（场景 3 已迁移） |
-| `docs/test_record_26081115.md` | 四种动作命令实现验证（mock + 单元级） |
-| `docs/test_record_26081123.md` | 场景 3 无头 15 机多 Master 端到端测试报告 |
+| `../README.md` | 项目主 README（操作手册） |

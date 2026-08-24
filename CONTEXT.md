@@ -1,14 +1,9 @@
 # Context Glossary
 
 > 本文件是项目领域词汇表，只解释概念、不承载文件路径、实现算法与验证参数。
-> - Phase 编号约定与全局设计规约（唯一权威）：`plans/README.md`
-> - 文档索引与当前状态：`plans/README.md`
-> - 开发日志（含 bug 修复记录）：`docs/tcp_to_ros_工程过程.md`
-> - 早期测试证据（已冻结）：`docs/tcp_to_ros_测试记录_早期.md`
-> - 场景 1/2/2+ 操作手册：`docs/test_record_26081021.md`
-> - 四种动作命令实现验证：`docs/test_record_26081115.md`
-> - 场景 3 无头 15 机端到端测试报告：`docs/test_record_26081123.md`
-> - 冻结实施计划：`plans/implementation_plan_*.md`
+> - Phase 编号约定、全局设计规约、文档索引与当前状态（唯一权威）：`plans/README.md`
+> - 当前实施计划：`plans/implementation_plan_26082415.md`（基线 `26082300`/`26082322`）
+> - 近期测试记录：`docs/test_record_26082400.md` / `docs/test_record_26082300.md`
 > - 包关系：`tcp_to_ros` 为 GCS_A 地面站业务包；`swarm_uav_interfaces` 为 GCS 与机载共同依赖的纯 ROS 接口包；`swarm_uav_executor` 为每架 UAV 本机部署的执行适配包；三者是相互独立的 Git 仓库。`swarm_topology_bridge` 是不解释 command 的通用通信包。工作空间根目录不拥有这些仓库，也不将两个新包登记为 submodule。
 
 ## Group A

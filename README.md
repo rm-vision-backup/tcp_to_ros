@@ -66,7 +66,7 @@ catkin_swarm6-2/
 | 固定编队 | ✅ | coverage-1 = A01-A12（3×4），coverage-2 = A01-A06+A13-A15（3×3）；集合不匹配拒绝 |
 | 按需起飞 | ✅ | takeoff 脚本：注入 RC 参数 → 切 HOLD/AUTO.LOITER → arm → OFFBOARD → ego 软起飞 5m → HOLD；15/15 成功 |
 | link_health + safe_hold | ✅ | 替代已删除的 lease 机制：节点丢失 → backend 判定 LOST → 全悬停 → 手动接管 |
-| 飞行安全租约（lease） | ❌ 已删除 | 见 plans/implementation_plan_26081406.md；时延敏感（renew 0.9s）+ 锁存难恢复，仿真与自组网实机都不可用 |
+| 飞行安全租约（lease） | ❌ 已删除 | 时延敏感（renew 0.9s）+ 锁存难恢复，仿真与自组网实机都不可用；决策见 plans/README.md |
 
 ### 关键 bug 修复（本会话）
 
@@ -86,10 +86,11 @@ catkin_swarm6-2/
 
 ## 4. 测试步骤
 
-最新实测手册（含步骤-预期-结果、可复制命令）见：
+最新实测记录（含步骤-预期-结果、可复制命令）见：
 
 ```text
-src/tcp_to_ros/docs/test_record_26081402.md
+src/tcp_to_ros/docs/test_record_26082400.md   （PVA 链路验收）
+src/tcp_to_ros/docs/test_record_26082300.md   （方案 B prepare）
 ```
 
 核心流程（简化）：
@@ -142,7 +143,7 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 |---|---|---|
 | `src/safe_valley_exp/startup_offboard_ego.sh` | 第 16-21 行：`ROS_HOME`/`ROS_LOG_DIR`/`WS`/`PX4_ROOT` | 机载层批量启动脚本；换环境必改 |
 | `src/safe_valley_exp/scripts/offboard_takeoff_15.py` | `ROS_SETUP`/`WS` 常量 | 起飞脚本；换环境必改 |
-| 本文档及 `docs/test_record_26081402.md` 内命令 | 每节 `cd /home/ub20tg/catkin_swarm6-2`、`export ...=/home/ub20tg/...` | 复制命令前先替换 |
+| 本文档内命令 | 每节 `cd /home/ub20tg/catkin_swarm6-2`、`export ...=/home/ub20tg/...` | 复制命令前先替换 |
 | `references/runtime/` 脚本（若本机运行 runtime） | 运行路径 | 可选，runtime 用相对路径为主 |
 
 > 只依赖 ROS 标准安装（`/opt/ros/noetic`）的路径通常不用改；涉及 `PX4_Firmware`、`catkin_swarm6-2`、
@@ -232,7 +233,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ## 9. 给下一个 coding agent 的快速指引
 
-1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `docs/test_record_26081402.md`（最新实测手册）。
+1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `docs/test_record_26082400.md`（最新实测记录）。
 2. 当前主任务：**重跑 prepare 六批次**（竞态修复 `192ad03` 后），随后做断 bridge → link_health LOST → safe_hold 故障注入验证。
 3. 改代码只动 `src/` 六个仓库；每包独立 commit（Conventional Commit，英文 header + 中文 body），**不 push**。
 4. 提交前 `catkin build` + 相关单测；测试记录写入 `docs/test_record_2608xxxx.md`（文件名后缀 = 2 位年月日时）。
@@ -245,10 +246,9 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 | 路径 | 内容 |
 |---|---|
 | `src/tcp_to_ros/plans/README.md` | Phase 编号、全局设计规约、实施计划索引、里程碑、当前状态 |
-| `src/tcp_to_ros/plans/implementation_plan_26081406.md` | **lease 删除**实施计划（方案 A） |
-| `src/tcp_to_ros/docs/test_record_26081402.md` | 最新 15 机实测手册（步骤-预期-结果，可复制命令） |
-| `src/tcp_to_ros/docs/tcp_to_ros_工程过程.md` | 开发日志（阶段、bug、决策） |
-| `src/tcp_to_ros/docs/test_record_26081300.md` | 冻结坐标/按需起飞/分层轨迹验证记录 |
+| `src/tcp_to_ros/plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
+| `src/tcp_to_ros/plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
+| `src/tcp_to_ros/docs/test_record_26082400.md` / `26082300.md` | PVA 链路 / 方案 B prepare 测试记录 |
 | `src/tcp_to_ros/README.md` | 本文件（项目总说明 + handoff） |
 | `src/ego_planner_driver/README.md` | ego 轨迹驱动接口与安全说明 |
 | `src/swarm_uav_executor/README.md` | 机载执行器接口与安全说明 |
