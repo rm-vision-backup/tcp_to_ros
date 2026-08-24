@@ -5,9 +5,51 @@ from __future__ import annotations
 import json
 import socket
 import threading
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set, Tuple
 
 from .protocol import MAX_MESSAGE_BYTES
+
+
+IP_LOCAL_PORT_RANGE = "/proc/sys/net/ipv4/ip_local_port_range"
+IP_LOCAL_RESERVED_PORTS = "/proc/sys/net/ipv4/ip_local_reserved_ports"
+
+
+def parse_port_range(value: str) -> Tuple[int, int]:
+    parts = value.split()
+    if len(parts) != 2:
+        raise ValueError("ip_local_port_range must contain two integers")
+    lower, upper = (int(part) for part in parts)
+    if not 0 <= lower <= upper <= 65535:
+        raise ValueError("invalid ip_local_port_range")
+    return lower, upper
+
+
+def parse_reserved_ports(value: str) -> Set[int]:
+    ports: Set[int] = set()
+    for item in value.strip().split(","):
+        item = item.strip()
+        if not item:
+            continue
+        bounds = item.split("-", 1)
+        lower = int(bounds[0])
+        upper = int(bounds[-1])
+        if not 0 <= lower <= upper <= 65535:
+            raise ValueError("invalid ip_local_reserved_ports entry: %s" % item)
+        ports.update(range(lower, upper + 1))
+    return ports
+
+
+def linux_port_is_ephemeral_and_unreserved(
+    port: int,
+    range_path: str = IP_LOCAL_PORT_RANGE,
+    reserved_path: str = IP_LOCAL_RESERVED_PORTS,
+) -> bool:
+    """Return whether Linux may allocate ``port`` to an unrelated socket."""
+    with open(range_path, "r", encoding="ascii") as stream:
+        lower, upper = parse_port_range(stream.read())
+    with open(reserved_path, "r", encoding="ascii") as stream:
+        reserved = parse_reserved_ports(stream.read())
+    return lower <= int(port) <= upper and int(port) not in reserved
 
 
 class JsonLineConnection:

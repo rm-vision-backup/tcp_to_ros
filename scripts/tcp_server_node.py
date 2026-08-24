@@ -31,7 +31,11 @@ from tcp_to_ros.protocol import (
     build_failed,
     parse_json_line,
 )
-from tcp_to_ros.server import JsonLineConnection, create_listener
+from tcp_to_ros.server import (
+    JsonLineConnection,
+    create_listener,
+    linux_port_is_ephemeral_and_unreserved,
+)
 from tcp_to_ros.state import ActiveTaskRegistry
 
 
@@ -45,6 +49,25 @@ class TcpToRosServerNode:
             "~emergency_hold_service",
             "/group_a/emergency_hold",
         )
+
+        # Claim the externally visible runtime port before waiting for ROS
+        # dependencies. ROS nodes use random XML-RPC ports and may otherwise
+        # consume 39001 while this node is blocked in wait_for_server().
+        self.listener = create_listener(self.host, self.port)
+        try:
+            if linux_port_is_ephemeral_and_unreserved(self.port):
+                rospy.logwarn(
+                    "TCP port %d is inside Linux ip_local_port_range and is not "
+                    "reserved; add it to net.ipv4.ip_local_reserved_ports on the "
+                    "GCS host to prevent ROS XML-RPC port collisions",
+                    self.port,
+                )
+            self._connect_ros_backend()
+        except Exception:
+            self.listener.close()
+            raise
+
+    def _connect_ros_backend(self) -> None:
 
         self.state_pub = rospy.Publisher(
             self.state_topic, GroupTaskState, queue_size=20
@@ -65,7 +88,6 @@ class TcpToRosServerNode:
         self.cache = CommandCache()
         self.tasks = ActiveTaskRegistry()
         self.connection: Optional[JsonLineConnection] = None
-        self.listener = create_listener(self.host, self.port)
 
     def run(self) -> None:
         rospy.loginfo("tcp_to_ros listening on %s:%d", self.host, self.port)

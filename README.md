@@ -154,7 +154,7 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 1. **6 个独立 git 仓库**：`src/` 下每包各自 `.git`，分别 commit，**不 push**；不把工作空间根建为 git 仓库。
 2. **`references/` 与 `verification/`**：只读参考 / 工程验证，不是交付物，不入任何 git 仓库。
 3. **`swarm_uav_interfaces` 版本一致**：所有 GCS_A、bridge、UAVn 主机必须安装、构建、source 完全相同的接口 commit，否则 ROS 类型 MD5 不匹配。
-4. **端口约定**（多 Master 隔离）：仿真 11300、GCS_A 11310、UAVn = 11310+n（11311..11325）、Gazebo 11345、TCP 39001；PX4 SITL 仿真 TCP 4560..4574、MAVLink UDP 34580..34594。换环境需核对，尤其实机无独立 Master 端口时。
+4. **端口约定**（多 Master 隔离）：仿真 11300、GCS_A 11310、UAVn = 11310+n（11311..11325）、Gazebo 11345、TCP 39001；PX4 SITL 仿真 TCP 4560..4574、MAVLink UDP 34580..34594。`39001` 位于常见 Linux 临时端口范围，GCS 主机必须通过 `net.ipv4.ip_local_reserved_ports` 保留，否则 ROS 节点的随机 XML-RPC 端口可能抢占它。启动前运行 `rosrun tcp_to_ros check_tcp_port.py --port 39001`；修改系统配置后须确认输出 `OK`。换环境需核对，尤其实机无独立 Master 端口时。
 5. **无 RC SITL 参数**：起飞脚本自动注入 `COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`；`COM_RC_IN_MODE` 默认 2（RC 全模式启用），无虚拟摇杆且处于手动模式（POSCTL）arm 会被拒（`manual control lost`）——takeoff 脚本已通过**先切 HOLD/AUTO.LOITER（Auto 模式免 RC）**规避。实机建议保留 RC 仅应急接管，`COM_RC_IN_MODE` 保持默认。
 6. **标定需 disarm**：gcs_a_calibration 要求 A01-A06 全 disarm + 数据连续 2s + 航向 30° 门禁；armed 时 `gp_origin_receiver` 拒绝改原点。
 7. **backend 单实例**：重复启动 `gcs_a_backend.launch` 会因 `gcs_a_calibration` 节点重名冲突，先停旧实例。
@@ -162,6 +162,24 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 9. **C++ 节点空闲态是 HOLD（无 IDLE）**：exec_state 初始/空闲为 `HOLD`；文档/脚本里旧 `IDLE` 表述是历史遗留。
 10. **日志**：统一写 `.ros_home/`；跨 Master 问题优先看 bridge 与对应 UAV 的 `uav_executor_UAVn-*.log`。
 11. **工具会话超时**：30s 工具限制会杀前台长进程；启动仿真/机载层/批次用 `setsid nohup ... > log 2>&1 < /dev/null &` 后台运行。
+
+#### GCS 业务 TCP 端口保留
+
+ROS 节点的 XML-RPC slave API 使用操作系统随机分配的 TCP 端口。若 `39001` 位于
+`ip_local_port_range` 且未被保留，先启动的任意 ROS 节点都可能随机占用 runtime 接口端口；
+这不是 topology bridge 的 ZMQ 端口冲突。`tcp_server_node.py` 会尽早绑定并在配置不安全时告警，
+但要覆盖 TCP server 尚未启动或重启的窗口，部署主机仍必须持久保留该端口。
+
+```bash
+# 只读检查（无需 root）
+cat /proc/sys/net/ipv4/ip_local_port_range
+cat /proc/sys/net/ipv4/ip_local_reserved_ports
+rosrun tcp_to_ros check_tcp_port.py --port 39001
+
+# 运维人员在 GCS 主机上把 39001 合并进现有保留列表；不得覆盖已有条目。
+# 持久配置写入 /etc/sysctl.d/ 后，再由运维人员执行 sysctl --system。
+# 最终必须重新运行 check_tcp_port.py 并得到 OK。
+```
 
 ### 5.3 最小部署包集合
 

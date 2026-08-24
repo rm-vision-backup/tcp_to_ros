@@ -103,9 +103,18 @@ GCS_A 必须：
   最终段静止、梯形 T）→ 0.4m 弧长采样 point_set → `parameterizeToBspline` → L-BFGS（jerk+feasibility）；
   默认停用 `enable_rebound`/`enable_time_reparam`；执行层 EGO 巡航距离门禁扩展 `_distance_safe`；
   `replan_period_s=1.0`、PositionTarget 契约不回归。多段 `minSnapTraj` 为备用方案（仅记录不实施）。
-- **验证进展**：全量 `catkin_test_results --all build` 166 tests 0 failure。多次 15 机无头 prepare
+- **验证进展（min-snap 基线）**：当时全量 `catkin_test_results --all build` 166 tests 0 failure。多次 15 机无头 prepare
   因机间接近（如 UAV3-UAV5 0.85m）触发距离门禁 HOLD 而整组 FAILURE，符合"双机不安全即 HOLD"预期；
   单机 MOVE_TO 独立飞行验证进行中。
+- **轨迹 intent 时间契约审计（2026-08-24）**：新增 `frame_id`；`stamp` 固定为候选实际激活 epoch，
+  `t` 为从 0 开始、严格递增且覆盖精确 duration 的相对时间。EGO 节点在优化后按实际激活时刻重基准
+  邻机预测，最多 3 次有限重试，并在提交锁内对最新 intent 做最终 hard-clearance；非法/过期/未来、
+  乱序和非有限 intent 均拒绝。rebound 输出强制满足动力学再按新时间轴复验 clearance。
+- **主动互惠边界（2026-08-24）**：理想匀速正交交叉已能主动绕行并满足 1m、速度 ≤1.5m/s、
+  加速度 ≤`max_acc*1.05`；但真实 peer min-snap nominal intent 的单边让路仍可能 `planOnce=false`，
+  多轮互惠收敛未通过。`enable_rebound` 因此继续默认 false，生产兜底仍是执行层距离门禁 HOLD，
+  禁止仅恢复开关作为主动避碰完成证据。最终全量结果为 186 tests、0 failure（含生产 EGO launch
+  展开后的 `enable_rebound=false` runtime rostest，以及 TCP listener 早绑定/端口策略回归）。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
@@ -118,6 +127,6 @@ GCS_A 必须：
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
-| `docs/test_record_26082300.md` / `26082400.md` | 方案 B prepare / PVA 链路测试记录 |
+| `docs/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |

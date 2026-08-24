@@ -54,6 +54,7 @@ catkin_package(
 )
 
 catkin_install_python(PROGRAMS
+  scripts/check_tcp_port.py
   scripts/tcp_4sim_test_client.py
   scripts/tcp_server_node.py
   scripts/mock_backend_node.py
@@ -70,6 +71,7 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_calibration.py)
   catkin_add_nosetests(test/test_fixed_formations.py)
   catkin_add_nosetests(test/test_tcp_disconnect_safety.py)
+  catkin_add_nosetests(test/test_tcp_port_policy.py)
 endif()
 
 install(DIRECTORY launch/
