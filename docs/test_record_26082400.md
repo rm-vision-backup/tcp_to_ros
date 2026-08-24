@@ -123,7 +123,31 @@
 - 新增回归测试：`RollingSegmentsReachCompleted`（滚动多段最终 COMPLETED）、
   `RollingSegmentsReachCompletedWithTrackingLag`（滞后 0.15m 下仍收敛）。
 
-### 2.4 ULog 分析
+### 2.4 原版对比与降震荡改动（Run 9-12）
+
+对照 `references/ego-planner-swarm` 动态重规划差异：
+
+| 维度 | 原版 | 当前移植版（本计划落地） |
+|---|---|---|
+| 时间参数化 | `ts=ctrl_pt_dist/max_vel*1.5`；优化后 STEP 3 `checkFeasibility`+`lengthenTime` 硬保证 v/a | 原固定 `ts=0.4` 无 reparam → **新增 STEP 3 `checkFeasibility`+`lengthenTime`**（`planOnce`） |
+| 重规划停止 | `t_cur>replan_thresh` 且 `(end-pos)>no_replan_thresh` | **新增 `no_replan_thresh_m=1.0`**：目标 1m 内停止时间重规划+退化完整剩余 |
+| 重规划周期 | 1.0s | 1.0s（2.0s A/B 对比后回退，见下） |
+
+- **Run 9（建议2+3+到达修复，replan 1.0）SUCCESS**：vmax 1.12-1.18、巡航 5s 窗口
+  [0.52, 0.69]。
+- **Run 10（+ts=0.6）TIMEOUT**：ts=0.6 使轨迹显著变慢，180s 内 12 机未全部完成
+  （UAV1 截止时仍在 x≈37）→ **ts 回退 0.4**（reparam 已能压峰值，无需 ts 预拉长）。
+- **Run 11（reparam+no_replan，ts=0.4，replan 1.0）SUCCESS**：vmax 1.12-1.46、
+  巡航 5s 窗口 [0.44, 0.71]、自相关 2.4s r=0.74。**速度震荡未明显改善**（reparam 只压
+  峰值、不改变每 1s 切段的段间速度 profile 差异）。
+- **Run 12（replan 2.0 A/B，12c 复测）SUCCESS 但波动仍差**：巡航 5s 窗口出现 0.02-0.05 深谷
+  （UAV2/6/9）、自相关 r=0.73-0.91；vmax 全时段 1.26-1.37、机间距 0.34m。2s 切段时速度
+  profile 展开更多、段间差异更大 → **replan 回退 1.0**（当前最优）。
+- **结论**：reparam（硬保证速度峰值 ≤ 逐轴限）+ no_replan（终点附近停止重规划）+ replan
+  1.0 为当前最优组合；巡航段速度波动 ±0.15 属"段间轨迹几何差异"固有，需更深度改动
+  （如轨迹速度 profile 均匀化/切段速度平滑）进一步压缩。
+
+### 2.5 ULog 分析
 
 - 脚本：`.tmp/analyze_ulog/analyze_prepare_trajectory.py`、`plot_uav_realtime.py`
   （p-t 三轴合并一张 + 新增三轴 v-t 一张 + speed）。
