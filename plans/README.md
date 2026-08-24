@@ -88,6 +88,7 @@ GCS_A 必须：
 | `implementation_plan_26081406.md` | 删除 safety lease 租约机制，`link_health` + `safe_hold` 替代 | **已实施** |
 | `implementation_plan_26082300.md` | 方案 B：机载分层航点 0.4m 密化 + C++ `planning_horizon` 滚动局部规划（对齐原版 ego-planner-swarm） | **部分实施（核心代码与 prepare 已完成；避碰及其余批次未验收）** |
 | `implementation_plan_26082322.md` | 周期性零速修复：EGO/follower 分源 `PositionTarget` + relay 唯一出口、仲裁与失效 HOLD | **已实施（2026-08-24，含 prepare 无头验收）** |
+| `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑（`one_segment_traj_gen`）+ 双机不安全时本机 HOLD 暂停（备用多段 minSnapTraj 仅记录、不实施） | **待实施** |
 
 > 被审计冻结基准不回填修改；本 README"当前状态"段为唯一实时权威。
 >
@@ -159,6 +160,17 @@ GCS_A 必须：
   `/mavros/setpoint_raw/local` 并实现选源/generation 隔离/freshness/finite 校验/固定位置 HOLD，
   `replan_period_s` 恢复为 1.0 s；旧 `/setpoint` PoseStamped 链路与旁路发布已清理。详见
   `docs/test_record_26082400.md`。
+- **min-snap 统一单段方案已登记（2026-08-24 15:52，`implementation_plan_26082415.md`，待实施）**：
+  成功判据=单机飞行平滑（速度无剧烈震荡）+ 双机不安全时 HOLD 暂停；本次不实施机间避碰行为，
+  未完成任务即 HOLD 作为避碰失败兜底，也不实施原版 2.1 完整安全机制。数据链：上层 keypoints
+  密化 0.4m→**2m**（仅作窗口推进/末点参考，不进 B-spline）；C++ `planOnce` 引入原版 min-snap
+  单段 `one_segment_traj_gen`（起点=旧轨迹 P/V/A、end_vel=切线巡航、仅最终段静止、梯形 T）→
+  0.4m 弧长等距采样 point_set → `parameterizeToBspline` → L-BFGS（jerk + feasibility 软惩罚）；
+  停用 rebound 硬推与时间重参数化（新增 `enable_rebound`/`enable_time_reparam` 默认 false）；
+  执行层 EGO 巡航距离门禁扩展 `_distance_safe`（复用 `neighbor_odom_topics`，水平 <1.0m 且垂直
+  <2.0m → 本机 HOLD 暂停）；`replan_period_s` 保持 1.0、PositionTarget 契约与 relay 唯一出口不回归。
+  备用多段 `minSnapTraj` 方案已写入计划（含触发条件与闭式解实现），**仅记录不实施**——它是单段
+  无法处理时的修改方案，非弓字 keypoints 后续功能；当前单段方案覆盖 MOVE_TO 与 FOLLOW_ROUTE。
 
 
 ## 文档索引
