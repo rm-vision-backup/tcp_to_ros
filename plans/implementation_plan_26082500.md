@@ -317,15 +317,18 @@ active 模式双机 SITL 出现 EMERGENCY 后审查确认下列缺陷/不一致�
    已 HOLD/BRAKE_HOLD 立即确认，任务超时兜底已删除；launch 参数 `ego_hold_timeout_s`
    （默认 2.0，ego HOLD/收口超时）与任务执行超时 `uav_task_timeout_s`(200s) 完全独立、
    各自上层输入。回归测试 4 项（immediate / brake_hold / expired / missing deadline）。
-2. ⬜ `yield_committed_` 使 WARNING 阶段无条件早退，提交候选后不再重新验证（新 peer intent、
-   候选可行性、预测距离持续下降均不检查）。应改"锁存 LEFT/RIGHT 方向但持续验证"，
-   仅方向不可行才切换，全部失败才制动。
-3. ⬜ 候选固定 1m clearance 验证与运行时动态 emergency 门槛不一致：候选可提交（≥1m）却在下
-   一 safety tick 被判 EMERGENCY。候选提交前应使用与运行时一致的动态门槛，补
-   "提交后下一 tick 不得直接 EMERGENCY"回归测试。
-4. ⬜ 0.6837m EMERGENCY 触发时 peer intent 年龄仅 17ms（非数据年龄放大），但实测最小距离约
-   1.92m——怀疑本机 odometry / supervisor `current_` / 邻机 intent 时间轴不一致或让路候选被
-   后续规划覆盖。需对齐三条曲线复现。
+2. ✅ **已修复** `yield_committed_` 使 WARNING 阶段无条件早退：改为"锁存方向但持续验证"——
+   已提交候选且邻机 intent 版本未变、预测距离仍在 emergency 边界外时保持（防 25Hz 抖动）；
+   peer 更新或候选恶化到边界内时基于最新 intent 重新评估（锁存方向优先 → 换方向 → 制动）。
+   回归测试：`ActiveYieldCommitsOnceAndReevaluatesOnPeerUpdate`。
+3. ✅ **已修复** 候选固定 1m clearance 验证与运行时动态 emergency 门槛不一致：
+   `YieldCandidateGenerator::validate` 现在用与 `SafetyPredictor` 同一公式计算候选起点的
+   动态 emergency 距离并在全时域检查（`emergency_boundary`），保证"提交后下一 tick 不得
+   直接 EMERGENCY"。回归测试：`RejectsCandidateInsideDynamicEmergencyBoundary` /
+   `AllowsCandidateOutsideDynamicEmergencyBoundary`；旧交叉测试改为平行近距场景。
+4. ✅ **诊断增强已落地**（复现待 SITL）：`PairPrediction` 新增 `peer_activation_epoch_s`；
+   `SafetyLogger` 新增 `self_odom_dev`（本机 odometry 与 supervisor `current_` 同刻采样
+   偏差）与 peer `act` 时间戳，日志可还原三线对齐。根因修复（时间契约/提交锁）待复现确认。
 5. ⬜ stale/missing 假配置（见 §6.1 警示）：launch 参数存在但生产 C++ 未实现策略。
    实现完整策略或删除/标记参数。
 6. ⬜ 候选规划速度上限与真实验收同为 1.5m/s，无 PX4 跟踪余量（实测峰值 1.580m/s）。
@@ -333,7 +336,7 @@ active 模式双机 SITL 出现 EMERGENCY 后审查确认下列缺陷/不一致�
 7. ⬜ 旧 executor 1m 门禁保留（阶段 E 前不删），但需增加 freshness 语义 + A/B 开关 +
    每轮触发统计；触发轮不能记为"安全通过"。
 
-修复顺序：1 → 2 → 3 → 4 → 5 → 6 → 7，每项独立提交并带回归测试；阶段 E 标定与 SITL 验收
+修复顺序：1 → 2/3 → 4 → 5 → 6 → 7，每项独立提交并带回归测试；阶段 E 标定与 SITL 验收
 在缺陷 2/3/4 修复后进行。
 
 ## 8. 文件级改动预期
