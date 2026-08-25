@@ -140,9 +140,10 @@ GCS_A 必须：
     仅存在于 launch，生产 C++ 未接入决策分支，勿据此判断系统行为。
   - 阶段 C tentative 协商屏障只在测试路径 `replanOnce()` 生效，**生产 `replanLoop()` 未接线**
     （直接提交 ACTIVE）；当前生产无 1s 协商延迟。接线与否属阶段 E 决策项。
-  - **参数改名（2026-08-25）**：`ego_state_timeout_s` 现为 ego 状态切换超时（默认 2s）；
-    任务执行超时改用 `uav_task_timeout_s`（默认 200s）。历史测试记录（如 `26082420`）
-    中的 `ego_state_timeout_s:=1200` 指旧语义的任务执行超时，阅读时注意区分。
+  - **参数改名（2026-08-25）**：`ego_hold_timeout_s` 为 ego HOLD/收口超时（默认 2s，
+    HOLD 确认/任务失败回退/shutdown join）；`uav_task_timeout_s` 为任务执行超时（默认 200s）；
+    driver 内部 `state_timeout_s` 改名 `task_timeout_s`。历史记录（如 `26082420`）中的
+    `ego_state_timeout_s`/`state_timeout_s` 指旧语义的任务执行超时，阅读时注意区分。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
