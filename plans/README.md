@@ -144,6 +144,8 @@ GCS_A 必须：
     HOLD 确认/任务失败回退/shutdown join）；`uav_task_timeout_s` 为任务执行超时（默认 200s）；
     driver 内部 `state_timeout_s` 改名 `task_timeout_s`。历史记录（如 `26082420`）中的
     `ego_state_timeout_s`/`state_timeout_s` 指旧语义的任务执行超时，阅读时注意区分。
+    同日删除 ego launch 中已无代码读取的过期参数 `terminal_to_idle_s`/`idle_hover_refresh_hz`
+    （IDLE 概念已随初始态改为 HOLD 而废弃）。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
