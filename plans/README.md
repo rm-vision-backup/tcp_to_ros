@@ -78,7 +78,7 @@ GCS_A 必须：
 | `implementation_plan_26082322.md` | 周期性零速修复：PositionTarget 分源 + relay 唯一出口、仲裁与失效 HOLD | 已实施（2026-08-24） |
 | `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
 | `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **已撤回**（L3 精简：yield/角色/协商已删除，监督只留 EMERGENCY 制动；见 `implementation_plan_26082602.md` 决策依据） |
-| `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **待实施**（10Hz 周期碰撞检查；事件驱动 replan 备用记录不实施） |
+| `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
