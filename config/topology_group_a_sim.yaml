@@ -51,6 +51,8 @@ topics:
   # leader 位姿桥接: FOLLOW_ROUTE follower 订阅 /<leader>/mavros/local_position/odom
   - {name: mavros/local_position/odom, type: nav_msgs/Odometry, max_freq: 0}
   - {name: trajectory_intent, type: swarm_uav_interfaces/UavTrajectoryIntent, max_freq: 0}
+  # GPS 时钟偏置（本机 bias 均值 1Hz）：桥到 GCS_A 与其他 UAV，接收端修正机间时间戳
+  - {name: gps_bias, type: std_msgs/Float64, max_freq: 0}
   # GCS_A 全局原点下发给所有 UAV: 机载 gp_origin_receiver 转发到 /mavros/global_position/set_gp_origin
   - {name: group_a/gp_origin, type: geographic_msgs/GeoPointStamped, max_freq: 0}
 
