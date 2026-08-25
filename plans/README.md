@@ -2,7 +2,7 @@
 
 > 本目录是 `tcp_to_ros` 项目的开发入口：维护 **Phase 编号约定**、**全局设计规约**、
 > **实施计划**与**当前状态**。新会话从此文件开始阅读。
-> 测试证据按期归档：`docs/test_record_2608xxxx.md`。
+> 测试证据按期归档：`test_records/test_record_2608xxxx.md`。
 
 ## Phase 编号约定（唯一权威）
 
@@ -77,7 +77,8 @@ GCS_A 必须：
 | `implementation_plan_26082300.md` | 方案 B：机载分层航点 + C++ `planning_horizon` 滚动局部规划 | 已实施（prepare 通过；避碰未验收） |
 | `implementation_plan_26082322.md` | 周期性零速修复：PositionTarget 分源 + relay 唯一出口、仲裁与失效 HOLD | 已实施（2026-08-24） |
 | `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
-| `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **实施中（A–D 自动测试完成；E 待实施，前置缺陷清单见计划 §7.5）** |
+| `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **已撤回**（L3 精简：yield/角色/协商已删除，监督只留 EMERGENCY 制动；见 `implementation_plan_26082602.md` 决策依据） |
+| `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **待实施**（10Hz 周期碰撞检查；事件驱动 replan 备用记录不实施） |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -98,7 +99,7 @@ GCS_A 必须：
   速度峰值 1.05-1.12m/s）。
 - **26082322（2026-08-24）**：EGO 发 P/V/A/yaw PositionTarget(mask 2048)、follower mask 2496、
   `setpoint_relay` 独占 `/mavros/setpoint_raw/local`（选源/generation/freshness/finite 校验、固定 HOLD）；
-  `replan_period_s=1.0`。详见 `docs/test_record_26082400.md`。
+  `replan_period_s=1.0`。详见 `test_records/test_record_26082400.md`。
 - **min-snap 统一单段重构（2026-08-24 已实施）**：上层 keypoints 最大 2m 密化（仅窗口推进/末点参考，
   不进 B-spline）；C++ `planOnce` 用 `one_segment_traj_gen` 单段（起点=旧轨迹 P/V/A、end_vel=切线巡航、
   最终段静止、梯形 T）→ 0.4m 弧长采样 point_set → `parameterizeToBspline` → L-BFGS（jerk+feasibility）；
@@ -146,6 +147,15 @@ GCS_A 必须：
     `ego_state_timeout_s`/`state_timeout_s` 指旧语义的任务执行超时，阅读时注意区分。
     同日删除 ego launch 中已无代码读取的过期参数 `terminal_to_idle_s`/`idle_hover_refresh_hz`
     （IDLE 概念已随初始态改为 HOLD 而废弃）。
+- **L3 精简（2026-08-25/26）**：删除 yield 候选（SLOW/LEFT/RIGHT/FAST）、SafetyPredictor 角色判定
+  （YIELD/STAND_ON）、intent 协商（TENTATIVE/NEGOTIATING）；监督层只保留 EMERGENCY 制动兜底；
+  动态距离公式合并为 `dynamicMargin` 单一实现；源码 4646→4083 行、node.cpp 1660→1426 行。
+  相应 launch 已清残留 yield/negotiation 参数。
+- **GPS 时钟偏置（2026-08-25）**：新增 `gps_bias_node`（订阅 `/mavros/time_reference`，10s 滑动均值
+  bias，1Hz 发布）+ 拓扑 bridge 转发；`ego_planner_driver` 接收端用
+  `T_own = T_other - bias_other + bias_own` 修正邻机 intent 激活时刻（`bias_valid_s=120s`，过期回退
+  相对时钟）。SITL 实测 `source=fcu` 有数据（bias≈90µs，共享时钟修正量≈0；实机 GPS/RTK 生效）。
+  时间戳修正为"固定 clearance 解耦"提供预测能力前提（见 implementation_plan_26082602）。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
@@ -156,10 +166,11 @@ GCS_A 必须：
 | 路径 | 内容 |
 |---|---|
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
-| `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（阶段 A 已完成） |
+| `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
+| `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（待实施） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
-| `docs/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
-| `docs/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
+| `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
+| `test_records/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |
