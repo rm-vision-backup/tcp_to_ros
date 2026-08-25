@@ -77,7 +77,7 @@ GCS_A 必须：
 | `implementation_plan_26082300.md` | 方案 B：机载分层航点 + C++ `planning_horizon` 滚动局部规划 | 已实施（prepare 通过；避碰未验收） |
 | `implementation_plan_26082322.md` | 周期性零速修复：PositionTarget 分源 + relay 唯一出口、仲裁与失效 HOLD | 已实施（2026-08-24） |
 | `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
-| `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **实施中（阶段 A–B 自动测试完成）** |
+| `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **实施中（A–D 自动测试完成；E 待实施，前置缺陷清单见计划 §7.5）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -125,6 +125,21 @@ GCS_A 必须：
 - **主动避碰增强阶段 B（2026-08-25 自动测试完成）**：新增从执行轨迹同刻 P/V/A 连续衔接的
   受约束停车轨迹，active emergency 可抢占 nominal；safety generation 阻止晚到规划覆盖制动；停车后
   锁存真实终点 `BRAKE_HOLD`。生产仍默认 shadow，SITL/延迟闭环前不声明飞行验收。
+- **主动避碰增强阶段 C/D（2026-08-25 自动测试完成）**：intent 协议 2.0 增加
+  tentative/active/braking phase（ROS MD5 变更，须同批重建全消费者）；≤1s 协商窗口、缺失邻机
+  不阻塞；数字 ID right-of-way + LEFT/RIGHT/SLOW/FAST 四候选与确定性评分。全工作区 229 tests
+  0 failure。生产 launch 默认 shadow。
+- **⚠️ 当前可信基线（2026-08-25 审查后冻结）**：
+  - ✅ **可用**：通信链路（bridge/Service/TCP 协议未动）、min-snap 轨迹执行/分层/起飞、
+    shadow 预测（只写日志不改行为）。
+  - 🚫 **冻结**：`safety_supervisor_mode=active`（制动/让路）存在已确认逻辑缺陷
+    （见 `implementation_plan_26082500.md` §7.5 缺陷清单 1–7），**SITL 禁止用 active 跑**，
+    生产保持 shadow。缺陷 1（`EgoSwarmDriver.hold()` 忽略 deadline 阻塞 200s）已修复，
+    缺陷 2–7 按清单顺序待修。
+  - ⚠️ **假配置**：`neighbor_stale_policy`/`neighbor_intent_stale_s`/`neighbor_missing_policy`
+    仅存在于 launch，生产 C++ 未接入决策分支，勿据此判断系统行为。
+  - 阶段 C tentative 协商屏障只在测试路径 `replanOnce()` 生效，**生产 `replanLoop()` 未接线**
+    （直接提交 ACTIVE）；当前生产无 1s 协商延迟。接线与否属阶段 E 决策项。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；

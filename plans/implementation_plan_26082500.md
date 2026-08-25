@@ -25,6 +25,17 @@
 - 12机 prepare 最后使用完整 TCP→GCS→UAV 通信链路回归；新增避碰专项测试不引入该完整链路；
 - 每机每次运行覆盖写入独立诊断文件，仿真从输入身份确定 UAVn，实机可从 hostname 回退确定身份。
 
+> **指标/参数/前置条件分层（2026-08-25 修订）**：本计划曾把三类内容混写在同一清单，造成
+> "做到什么程度算达标"无法判断，现明确分层：
+> - **验收指标（冻结，达标判断唯一依据）**：实际中心距 ≥1.0m；真实验收速度 ≤1.5m/s；
+>   无双方重规划 ping-pong 与让路方向振荡；动力学约束不回归；12 机 prepare 全链路回归通过。
+> - **实现参数（可调，非指标）**：候选速度档 `0–1.5m/s` 是 YieldCandidateGenerator 内部离散
+>   档位，**不等于**真实验收速度上限；`intent_negotiation_wait_s=1.0`、`warning/emergency_buffer`、
+>   `emergency_decel`、预测窗等均为可标定参数，不构成验收判据。
+> - **测试前置/背景（非指标）**：专项场景初始间距 3m 与"每次预检 ≥3m"只是避碰专项测试的
+>   初始布置，**不是任务指标**，12 机 prepare 仍用既有 5m 方阵；200–800ms 延迟是实机自组网
+>   背景与测试注入条件，不是本计划要配置的运行参数。
+
 ## 2. 已确认基线与问题
 
 ### 2.1 保留并复用的基线
@@ -65,7 +76,7 @@
 
 - 不修改统一坐标和时间同步流程，不增加原点重启/异常重启恢复逻辑；
 - 专项双/三机场景新增独立 launch，设计初始水平间距为 3m；预检发现实际间距过小时拒绝该专项场景。
-  3m 不是 12机 prepare 指标或起飞条件；既有 12机 5m 方阵初始布置保持不变，不为本计划修改；
+  3m 是**避碰专项测试的前置条件，不是任务指标**；既有 12机 5m 方阵初始布置保持不变，不为本计划修改；
 - 不修改任务规划层航路来预先消除冲突；
 - 不恢复通信双向看门狗，不因预期邻机 intent 缺失直接判任务失败或永久 HOLD；
 - 不增加 leader priority；UAV1 已固定为 leader，right-of-way 仅按数字 ID；
@@ -186,6 +197,11 @@ emergency_distance_m = 1.0 + closing_margin_m + braking_margin_m + emergency_buf
 默认 `diagnose_only` 下 stale/missing 只记录、计入预测不确定性，不直接导致任务失败。只有完成延迟注入
 A/B 后，才允许把 `brake_if_closing` 设为实验默认；`brake_always` 不作为自组网默认配置。
 
+> **假配置警示（2026-08-25 审查确认）**：`neighbor_stale_policy` / `neighbor_intent_stale_s` /
+> `neighbor_missing_policy` 当前**只存在于 launch**，生产 C++ 未读取、未接入决策分支
+> （仅 `peer_data_age_cap_s` 进入动态门槛计算）。完整实现前这些参数视为"未生效配置"，
+> 不得据此判断系统行为；实现或删除必须单独提交并更新本计划状态。
+
 ### 6.2 每机覆盖日志
 
 在当前工作空间内新增运行日志目录，例如：
@@ -290,6 +306,33 @@ SLOW/FAST 使用离散时间缩放；统一 validator 和确定性评分已落�
 - 仅在所有验收通过后增加“关闭旧门禁”的显式 A/B 参数并重跑全部专项场景；
 - 若关闭后仍满足 ≥1m，可在独立变更中删除旧门禁；否则保留，不以计划目标强行删除；
 - 更新 `ego_planner_driver`、`swarm_uav_executor` README、launch 注释、操作手册和测试记录。
+
+### 阶段 E 前置：已确认缺陷清单（2026-08-25 审查确认）
+
+active 模式双机 SITL 出现 EMERGENCY 后审查确认下列缺陷/不一致。**全部修复并回归前，
+生产 launch 必须保持 `safety_supervisor_mode=shadow`，SITL 禁止用 active 跑。**
+
+1. ✅ **已修复** `EgoSwarmDriver.hold()`：忽略调用方 deadline，可阻塞 `state_timeout_s`(200s)。
+   已改为已处于 HOLD/BRAKE_HOLD 立即确认 + 等待上限 `min(deadline, state_timeout_s)`；
+   回归测试 3 项（immediate / brake_hold / deadline）。
+2. ⬜ `yield_committed_` 使 WARNING 阶段无条件早退，提交候选后不再重新验证（新 peer intent、
+   候选可行性、预测距离持续下降均不检查）。应改"锁存 LEFT/RIGHT 方向但持续验证"，
+   仅方向不可行才切换，全部失败才制动。
+3. ⬜ 候选固定 1m clearance 验证与运行时动态 emergency 门槛不一致：候选可提交（≥1m）却在下
+   一 safety tick 被判 EMERGENCY。候选提交前应使用与运行时一致的动态门槛，补
+   "提交后下一 tick 不得直接 EMERGENCY"回归测试。
+4. ⬜ 0.6837m EMERGENCY 触发时 peer intent 年龄仅 17ms（非数据年龄放大），但实测最小距离约
+   1.92m——怀疑本机 odometry / supervisor `current_` / 邻机 intent 时间轴不一致或让路候选被
+   后续规划覆盖。需对齐三条曲线复现。
+5. ⬜ stale/missing 假配置（见 §6.1 警示）：launch 参数存在但生产 C++ 未实现策略。
+   实现完整策略或删除/标记参数。
+6. ⬜ 候选规划速度上限与真实验收同为 1.5m/s，无 PX4 跟踪余量（实测峰值 1.580m/s）。
+   候选上限降至 1.35–1.40m/s 标定，或暂时禁用 FAST。
+7. ⬜ 旧 executor 1m 门禁保留（阶段 E 前不删），但需增加 freshness 语义 + A/B 开关 +
+   每轮触发统计；触发轮不能记为"安全通过"。
+
+修复顺序：1 → 2 → 3 → 4 → 5 → 6 → 7，每项独立提交并带回归测试；阶段 E 标定与 SITL 验收
+在缺陷 2/3/4 修复后进行。
 
 ## 8. 文件级改动预期
 
