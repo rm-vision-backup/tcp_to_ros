@@ -11,6 +11,8 @@
   `runtime_logs/ego_planner/`。
 - 无头/SITL 前按需清理 `.ros_home`，但不删除历史证据目录；测试结束 HOLD 测试机并检查残留。
 - 阶段 A 仅 shadow。任何 warning/emergency 预测均不得改变 setpoint、intent、轨迹或状态。
+- 双/三机专项 launch 使用 3m 初始间距。12机 prepare 保持既有 5m 方阵；3m 不是其指标。12机发任务前
+  必须确认 GCS 统一 local 坐标及实测初始间距，历史近距异常优先按原点/启动流程故障拒绝测试。
 
 ## 1. 实施前基线
 
@@ -82,7 +84,7 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 |---|---|---|
 | B：受约束紧急制动 | 自动测试完成，SITL 待验收 | ego 104 tests；executor 专项 24 passed |
 | C：tentative intent 屏障 | 自动测试完成，延迟闭环待验收 | ego 110 tests；bridge phase roundtrip |
-| D：确定性四候选让路 | 待实施 | — |
+| D：确定性四候选让路 | 自动测试完成，闭环待验收 | ego 118 tests |
 | 双节点动力学闭环 | 待执行 | — |
 | PX4 SITL 单/双/三机 | 待执行 | — |
 | 12机 prepare 完整链路 | 待执行 | — |
@@ -113,3 +115,11 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 - bridge 使用原生 ROS bytes 透传，新增三种 phase serialize/deserialize roundtrip；
 - `ego_planner_driver`：**110 tests，0 failure**；全工作区结果 **221 tests，0 errors，0 failures**。
   双节点 100–1200ms 延迟/乱序/丢失尚未执行。
+
+## 7. 阶段 D 自动测试
+
+- LEFT/RIGHT C2 横移、SLOW/FAST 离散时间档位、起终点连续、动力学和全 peer clearance；
+- 确定性评分、精确 tie 固定枚举顺序、全部失败返回无候选；
+- active WARNING：STAND_ON 不切轨迹，YIELD episode 内只提交一次，失败/UNKNOWN 转制动；
+- `ego_planner_driver`：**118 tests，0 failure**；全工作区 **229 tests，0 errors，0 failures**。
+  真实双节点和 PX4 跟踪尚未验证。

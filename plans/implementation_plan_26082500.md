@@ -2,7 +2,7 @@
 
 日期：2026-08-25 00:57
 
-状态：**实施中（阶段 A–C 自动测试完成；阶段 D–E 待实施）**
+状态：**实施中（阶段 A–D 自动测试完成；阶段 E 待实施）**
 
 ## 1. 目标与成功判据
 
@@ -64,7 +64,8 @@
 ### 3.2 不做事项
 
 - 不修改统一坐标和时间同步流程，不增加原点重启/异常重启恢复逻辑；
-- 不处理初始水平间距小于 3m 的实验外启动条件；测试预检发现该条件时直接拒绝启动场景；
+- 专项双/三机场景新增独立 launch，设计初始水平间距为 3m；预检发现实际间距过小时拒绝该专项场景。
+  3m 不是 12机 prepare 指标或起飞条件；既有 12机 5m 方阵初始布置保持不变，不为本计划修改；
 - 不修改任务规划层航路来预先消除冲突；
 - 不恢复通信双向看门狗，不因预期邻机 intent 缺失直接判任务失败或永久 HOLD；
 - 不增加 leader priority；UAV1 已固定为 leader，right-of-way 仅按数字 ID；
@@ -266,6 +267,10 @@ commit-lock hard-clearance 已共用单一事务，因此未额外抽取重复�
 
 ### 阶段 D：确定性 right-of-way 与四候选
 
+状态：**自动测试完成（2026-08-25），双节点/SITL 待验收**。LEFT/RIGHT 使用 C2 横移并离散延时，
+SLOW/FAST 使用离散时间缩放；统一 validator 和确定性评分已落地。WARNING 仅 YIELD 提交一次候选并
+锁存方向，STAND_ON 保持 nominal；全部失败或 UNKNOWN 转制动，EMERGENCY 无条件制动。
+
 - 新增独立 `YieldCandidateGenerator`，构造 LEFT/RIGHT/SLOW/FAST；
 - STAND_ON 在 warning 级保持 nominal 并持续发布 active intent；YIELD 才生成让路候选；
 - 候选使用统一 min-snap/B-spline 参数化和 P/V/A 起点约束，但不经过 rebound；
@@ -371,7 +376,8 @@ relay raw setpoint 和每机 ULog，并保存每机 `UAVn-ego-planner.log`。测
 
 专项测试全部通过后，才启动 TCP→GCS→UAV 完整通信链路执行 A01–A12 prepare：
 
-- 起始水平间距 ≥3m；
+- 保持既有 5m 方阵仿真初始布置；任务前先确认 GCS 统一 local 坐标完成，并按统一坐标实测初始间距。
+  若出现历史 0.47–0.85m 类异常，先判定为原点统一/启动步骤异常并拒绝发任务，不能当作正常避碰输入；
 - 12/12 到达 `COMPLETED`，或任何真实安全失败按 ALL 策略安全收口；
 - 全程中心距 ≥1.0m、速度 ≤1.5m/s；
 - intent 延迟分布、warning/emergency 次数、候选选择和旧门禁触发次数写入测试记录；
