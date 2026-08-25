@@ -46,7 +46,7 @@ catkin_swarm6-2/
 ├── verification/           工程验证脚本（不属于任何 git 仓库；ego_smoke、acceptance、plot 脚本）
 ├── .ros_home/              统一 ROS 日志目录（避免散落 ~/.ros）
 ├── build/ devel/ logs/     catkin 构建产物
-└── docs 相关              （见 src/tcp_to_ros/docs 与 plans）
+└── docs 相关              （见 src/tcp_to_ros/test_records 与 plans）
 ```
 
 **重要**：`references/` 是参考而不是开发文件夹，改动一律不入 git；`verification/` 是工程验证脚本，
@@ -89,8 +89,8 @@ catkin_swarm6-2/
 最新实测记录（含步骤-预期-结果、可复制命令）见：
 
 ```text
-src/tcp_to_ros/docs/test_record_26082400.md   （PVA 链路验收）
-src/tcp_to_ros/docs/test_record_26082300.md   （方案 B prepare）
+src/tcp_to_ros/test_records/test_record_26082400.md   （PVA 链路验收）
+src/tcp_to_ros/test_records/test_record_26082300.md   （方案 B prepare）
 ```
 
 核心流程（简化）：
@@ -251,10 +251,10 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ## 9. 给下一个 coding agent 的快速指引
 
-1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `docs/test_record_26082400.md`（最新实测记录）。
+1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `test_records/test_record_26082400.md`（最新实测记录）。
 2. 当前主任务：**重跑 prepare 六批次**（竞态修复 `192ad03` 后），随后做断 bridge → link_health LOST → safe_hold 故障注入验证。
 3. 改代码只动 `src/` 六个仓库；每包独立 commit（Conventional Commit，英文 header + 中文 body），**不 push**。
-4. 提交前 `catkin build` + 相关单测；测试记录写入 `docs/test_record_2608xxxx.md`（文件名后缀 = 2 位年月日时）。
+4. 提交前 `catkin build` + 相关单测；测试记录写入 `test_records/test_record_2608xxxx.md`（文件名后缀 = 2 位年月日时）。
 5. 环境清理、端口、日志、无 RC 参数等注意点见本文档第 5 节。
 
 ---
@@ -266,7 +266,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 | `src/tcp_to_ros/plans/README.md` | Phase 编号、全局设计规约、实施计划索引、里程碑、当前状态 |
 | `src/tcp_to_ros/plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `src/tcp_to_ros/plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
-| `src/tcp_to_ros/docs/test_record_26082400.md` / `26082300.md` | PVA 链路 / 方案 B prepare 测试记录 |
+| `src/tcp_to_ros/test_records/test_record_26082400.md` / `26082300.md` | PVA 链路 / 方案 B prepare 测试记录 |
 | `src/tcp_to_ros/README.md` | 本文件（项目总说明 + handoff） |
 | `src/ego_planner_driver/README.md` | ego 轨迹驱动接口与安全说明 |
 | `src/swarm_uav_executor/README.md` | 机载执行器接口与安全说明 |

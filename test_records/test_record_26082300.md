@@ -5,7 +5,7 @@
 测试环境：PX4 SITL + Gazebo（无头）+ MAVROS + ego_planner_driver + swarm_uav_executor + swarm_topology_bridge + GCS_A + TCP runtime  
 对应实施计划：`plans/implementation_plan_26082300.md`
 
-> **说明**：§1 复用 `docs/test_record_26081402.md` §2.1-2.7 的步骤/预期/结果（简写引用）；
+> **说明**：§1 复用 `test_records/test_record_26081402.md` §2.1-2.7 的步骤/预期/结果（简写引用）；
 > §2 单元测试与 §3 端到端批次任务测试为本计划详写项，**结果在测试执行后回填**。
 
 ## 0. 测试目标

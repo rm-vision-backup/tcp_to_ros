@@ -229,7 +229,7 @@ A/B 后，才允许把 `brake_if_closing` 设为实验默认；`brake_always` �
 ### 阶段 A：预测数学、身份和日志基础（不改变飞行行为）
 
 状态：**已完成（2026-08-25）**。实现与验证见
-`docs/test_record_26082501.md`。现有 `replanLoop()` 只调 `replanOnce()`，候选生成、激活时重基准和
+`test_records/test_record_26082501.md`。现有 `replanLoop()` 只调 `replanOnce()`，候选生成、激活时重基准和
 commit-lock hard-clearance 已共用单一事务，因此未额外抽取重复实体。生产 launch 默认 25Hz shadow；
 库内直接构造默认 off，避免单测隐式文件 IO。误配 active 会告警并降级 shadow，阶段 B 前不改变行为。
 
@@ -365,7 +365,7 @@ active 模式双机 SITL 出现 EMERGENCY 后审查确认下列缺陷/不一致�
 - `src/swarm_uav_executor/test/test_ego_swarm_driver.py`
 - `verification/ego_smoke/` 下新增闭环场景 runner，并更新现有 reciprocal 脚本的过时 rebound 前置条件；
 - `src/tcp_to_ros/config/topology_group_a_sim.yaml`（仅在 intent 协议/topic 改变时同步）；
-- `src/tcp_to_ros/docs/test_record_2608xxxx.md`（实施当日新建，不回填旧测试记录）。
+- `src/tcp_to_ros/test_records/test_record_2608xxxx.md`（实施当日新建，不回填旧测试记录）。
 
 不预先承诺新增第三方库；数值计算继续使用 Eigen/C++14，测试沿用 gtest/ROS/Python 现有栈。
 
@@ -485,4 +485,4 @@ catkin_test_results --all build
 - 12机 prepare 使用完整通信链路回归并归档 rosbag、节点日志和 ULog；
 - `enable_rebound=false`、PositionTarget 契约、relay 唯一出口、分层高度和 1s 常规重规划基线不回归；
 - 旧 1m 门禁只有在关闭 A/B 全部通过后才可独立删除；未达到证据门槛则继续保留；
-- 自动测试 0 failure，实施结果写入新的 `docs/test_record_2608xxxx.md`。
+- 自动测试 0 failure，实施结果写入新的 `test_records/test_record_2608xxxx.md`。

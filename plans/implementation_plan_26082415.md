@@ -201,7 +201,7 @@ C++（ego_planner_driver）
 3. C++ `planOnce`：min-snap 初始 point_set 生成 + 边界导数 + 梯形 T；加 `enable_rebound`/`enable_time_reparam` 参数默认 false；
 4. 执行层：EGO 巡航距离门禁（复用 `_distance_safe` 逻辑扩展）；
 5. 单测回归 + 单机无头 prepare（平滑验证）+ 双机交叉（HOLD 验证）；
-6. 文档落盘：`plans/README.md` 状态更新、新 `docs/test_record_2608xxxx.md`（按测试归档命名规范，日期取实施当日）；
+6. 文档落盘：`plans/README.md` 状态更新、新 `test_records/test_record_2608xxxx.md`（按测试归档命名规范，日期取实施当日）；
 7. 按仓库提交（`ego_planner_driver`、`swarm_uav_executor`；Conventional Commit，不 push）。
 
 ## 8. 回滚方案

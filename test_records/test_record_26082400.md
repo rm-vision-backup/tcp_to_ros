@@ -72,7 +72,7 @@
 
 ## 2. 端到端 prepare 复测（无头 15 机）
 
-> 启动步骤复用 `docs/test_record_26082300.md` §1（仿真层/机载层/GCS/标定/TCP/起飞）。
+> 启动步骤复用 `test_records/test_record_26082300.md` §1（仿真层/机载层/GCS/标定/TCP/起飞）。
 > 无头测试前清空 `.ros_home`（保留文件夹）。
 
 ### 2.1 环境与起飞

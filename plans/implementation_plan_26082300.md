@@ -2,7 +2,7 @@
 
 [Overview]
 
-针对 2026-08-22 有头模式 prepare 复测暴露的问题（复测数据与结构说明见 `docs/test_record_26082300.md`）：
+针对 2026-08-22 有头模式 prepare 复测暴露的问题（复测数据与结构说明见 `test_records/test_record_26082300.md`）：
 
 1. **速度超标**：轨迹峰值 10.6 m/s（远超 1.0 m/s 预期）。根因：C++ `planOnce` 一次规划完整航线（全局规划），
    稀疏关键点 + 固定 knot span ts=0.4 把整条航线压缩进少量 B-spline 控制点；`max_vel` 为软惩罚
@@ -106,8 +106,8 @@ launch 参数放宽。
 
 ### 文档
 
-- 新增 `docs/test_record_26082300.md`：方案 B 测试记录。
-  - **复用** `docs/test_record_26081402.md` §2.1-2.7（环境/仿真层/机载层/GCS/标定/TCP/起飞）的
+- 新增 `test_records/test_record_26082300.md`：方案 B 测试记录。
+  - **复用** `test_records/test_record_26081402.md` §2.1-2.7（环境/仿真层/机载层/GCS/标定/TCP/起飞）的
     步骤、预期与结果（简写引用，不复制正文）。
   - **详写**本计划单元测试与端到端批次任务测试的步骤/预期/结果（结果在测试执行前留空）。
 - `plans/README.md`：实施计划表登记本计划（待实施）。
@@ -139,10 +139,10 @@ launch 参数放宽。
 
 [Testing]
 
-测试记录：`docs/test_record_26082300.md`（单元测试与端到端批次任务测试的详细步骤/预期/结果见该文档，
+测试记录：`test_records/test_record_26082300.md`（单元测试与端到端批次任务测试的详细步骤/预期/结果见该文档，
 结果在测试执行前留空）。
 
-### 复用步骤（预期/结果沿用 `docs/test_record_26081402.md`）
+### 复用步骤（预期/结果沿用 `test_records/test_record_26081402.md`）
 
 - `test_record_26081402.md` §2.1 ROS/PX4 环境、§2.2 仿真层、§2.3 机载层、§2.4 GCS bridge、
   §2.5 backend+标定、§2.6 TCP server、§2.7 逐机 takeoff 的步骤/预期/结果直接复用，本计划不重复。
@@ -174,7 +174,7 @@ launch 参数放宽。
    更新 C++ 单测。
 3. launch/config 参数对齐；`catkin build` 6 包全过；全量单测回归。
 4. 有头/无头模式端到端验证 prepare（速度/分层/避碰/到达），再依次跑其余批次。
-5. 结果回写 `docs/test_record_26082300.md`，各包独立 commit（Conventional Commit），不 push。
+5. 结果回写 `test_records/test_record_26082300.md`，各包独立 commit（Conventional Commit），不 push。
 
 ## 补充 4：修复滚动 replan 簿记 bug（UAV 停在半途，2026-08-23 有头诊断确认）
 
