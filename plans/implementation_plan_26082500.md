@@ -313,10 +313,10 @@ active 模式双机 SITL 出现 EMERGENCY 后审查确认下列缺陷/不一致�
 生产 launch 必须保持 `safety_supervisor_mode=shadow`，SITL 禁止用 active 跑。**
 
 1. ✅ **已修复** `EgoSwarmDriver.hold()`：忽略调用方 deadline，可阻塞 `state_timeout_s`(200s)。
-   已改为只使用调用方 deadline（executor 传 `clock()+ego_state_transition_timeout_s`，默认 2s），
-   已 HOLD/BRAKE_HOLD 立即确认，`state_timeout_s` 兜底已删除；新 launch 参数
-   `ego_state_transition_timeout_s`（默认 2.0）与任务执行超时 `ego_state_timeout_s`(200s)
-   完全独立、各自上层输入。回归测试 4 项（immediate / brake_hold / expired / missing deadline）。
+   已改为只使用调用方 deadline（executor 传 `clock()+ego_state_timeout_s`，默认 2s），
+   已 HOLD/BRAKE_HOLD 立即确认，`state_timeout_s` 兜底已删除；launch 参数 `ego_state_timeout_s`
+   （默认 2.0，ego 状态切换超时）与任务执行超时 `uav_task_timeout_s`(200s) 完全独立、
+   各自上层输入。回归测试 4 项（immediate / brake_hold / expired / missing deadline）。
 2. ⬜ `yield_committed_` 使 WARNING 阶段无条件早退，提交候选后不再重新验证（新 peer intent、
    候选可行性、预测距离持续下降均不检查）。应改"锁存 LEFT/RIGHT 方向但持续验证"，
    仅方向不可行才切换，全部失败才制动。
