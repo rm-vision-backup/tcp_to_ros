@@ -156,3 +156,31 @@ intent 发布到 `/neighbor_intent`）+ `.tmp/scripts/send_task_uav2.py`（任�
 双方 COMPLETED 8/9（原始版 3/5）。min_3d 全程 ≥1.0m（1.15-1.62m），无距离门禁事件。
 
 
+
+## 10. 最大速度写入 ego 驱动 + 双机交换/三机交叉测试（轮次重计）
+
+### 10.1 修改内容
+
+- **用户决策**：最大速度限制从 verification 判定移入 ego 驱动——候选/加速档速度上限
+  `yield_max_velocity_mps=2.5`（独立参数，原候选复用 `emergency_max_velocity_mps=1.5` 已解耦，
+  制动上限保持 1.5）；verification `--max-speed` 保持 2.5 与驱动一致（来源注释已注明）。
+- **测试脚本**：`reciprocal_15sitl.py` 新增 `--swap`（双机同线对向交换，中点相遇）；
+  新增 `triple_cross_15sitl.py`（三机同时交叉：A 沿 x+、B 沿 y+、C 沿 45° 对角，中心交汇，
+  三线程 barrier START，三对 pairwise 最小距离判定）。
+- **轮次约定（新）**：每次修改源码/参数后，SITL 测试轮次从 **Run1 重新计数**（避免跨版本
+  混比）；本轮次基准 = `yield_max_velocity_mps` 提交后。
+
+### 10.2 单元测试
+
+- 全量 **263 tests, 0 errors, 0 failures**（`yield_max_velocity_mps` 参数断言新增）。
+
+### 10.3 测试流程（本轮次，从 Run1 重计）
+
+| 轮 | 场景 | 命令 |
+|---|---|---|
+| Run1 | 双机正交 | `reciprocal_15sitl.py`（默认场景） |
+| Run2 | 双机交换 | `reciprocal_15sitl.py --swap` |
+| Run3 | 三机交叉 | `triple_cross_15sitl.py`（UAV1/2/3 active） |
+
+结果在测试执行后回填。
+
