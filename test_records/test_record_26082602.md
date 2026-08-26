@@ -68,30 +68,42 @@ catkin_test_results --all build
 - `swarm_uav_executor`：launch 静态测试更新后通过；
 - 全量：**232 tests，0 errors，0 failures**。
 
-## 3. SITL 双机正交/换位（§6.2 专项，**未完成——环境阻塞**）
+## 3. SITL 双机正交（2026-08-26 重跑，bridge 修复后）
 
-### 3.1 尝试
+### 3.1 启动链（bridge 修复 + startup HLOG 修复后全通）
 
-- 用 `.tmp/scripts/startup_ego_sitl.sh "1 2" active` 一键启动（sim/onboard/gcs/标定/active/takeoff）；
-- sim（15 px4 + 15 spawn）PASS；onboard 15/15 ready PASS；GCS bridge→backend PASS（服务代理
-  `/UAVn/uav_task` 15 机齐全）；**卡在阶段 4 标定**（`/group_a/calibration_ready=False` 持续 ~30 分钟）。
+- **bridge 根因修复**：旧运行残留 UAV1/UAV2 `bridge_node.py`（8-25 23:13 启动）占用 UAV ZMQ
+  topic 端口（4300+/4400+），新 bridge bind 失败退出 → GCS 收不到 A01/A02 → 标定卡死。
+  `cleanup.sh`/`startup_ego_sitl.sh` 预检此前不含 bridge 进程 → 漏杀。已修复（cleanup 加
+  `[b]ridge_node` 清理与残留检查；startup 预检加 bridge 计数）。
+- **startup 脚本 bug**：`HLOG` 未 export，`wait_until` 的 `bash -c` 子进程 `$HLOG` 为空 →
+  卡在 sim spawn 检查。已修复（`export HLOG`）。
+- 修复后 `startup_ego_sitl.sh "1 2" active`：sim/onboard/gcs/**标定(True)**/active/takeoff 全通
+  （takeoff 首跑时机失败，手动重跑 2/2 OK）。
 
-### 3.2 根因（既有环境链路问题，非本次代码改动）
+### 3.2 双机正交结果（reciprocal_15sitl.py）
 
-- GCS_A（11310）侧 `/UAVn/mavros/state`、`/UAVn/mavros/global_position/global` 有 bridge
-  publisher，但**无数据流动**（`rostopic echo` 无消息）；
-- UAV1（11311）本地 `/mavros/state` 有数据且 publishers 正常，但 **UAV 侧 swarm_bridge 未订阅
-  本地 `/mavros/state`**（topic 转发未激活）→ GCS 标定节点 `_try_freeze` 数据不足恒 return，
-  无 blocked/ready 日志；
-- bridge TCP 链路 ESTAB（4201 等）、service 代理正常（`dealer connected`/`proxying`），
-  仅 topic 数据流未建立；疑似 bridge topic 按需转发注册/建链时序问题（既有行为）。
+- **UAV2 COMPLETED**（偏差 0.15m，max_speed 1.04 m/s，intent 转发正常
+  `neighbor_intent_input_seen=true`）；min_3d_distance=7.166m（两机未接近）。
+- **UAV1 FAILED `BRAKE_HOLD`**（误触发）：
+  - `UAV1-ego-planner.log` L397：`level=EMERGENCY peer={UAV2, age:1.277s, distance:10.42m,
+    min_d:3.89m, warning_d:4.155, emergency_d:3.905}`；
+  - 根因：26082602 删周期 5Hz 刷新后 intent 发布频率 5Hz→~1Hz，监督层 `data_age` 从 ~0.2s 涨到
+    1.28s，动态门槛被 age 放大到 3.9m，正交交叉预测窗内 `min_d 3.89 < 3.905` → 误判 EMERGENCY；
+  - 原版无此问题：监督只用固定 CLEARANCE + 当前时刻采样，无 age 概念。
 
-### 3.3 影响与结论
+### 3.3 监督层修订（对齐原版，本次实施）
 
-- 标定不 ready → 无法 takeoff → 双机正交/换位 SITL 未执行；
-- 与 26082602 改动无关（仅影响 `ego_planner_driver` 内部与 launch 参数，不涉及 bridge/标定链路）；
-- 需按既有流程整体干净重启（`cleanup.sh` 后重跑 `startup_ego_sitl.sh`）或人工介入
-  bridge topic 转发排障后，再执行 §6.2 双机正交/换位与 intent 停发注入。
+1. **reaction 不再含 data_age**：邻机轨迹激活时刻已由 GPS bias 修正到本机时间轴（同刻采样即
+   预测），`data_age` 不代表位置不确定性 → 从动态门槛反应时间移除（仅诊断）。对齐原版固定
+   CLEARANCE 语义，防止发布频率降低后门槛被放大误触发。
+2. **EMERGENCY 先重规划再急停**（对齐原版 `checkCollisionCallback`/`planFromCurrentTraj`）：
+   - EMERGENCY 时先置 `planning_requested_` + 同步尝试 `replanOnce()`（`replan_failure_fatal_=false`
+     失败不收口 HOLD）；成功 → 继续执行；
+   - 失败且预测越界时间 `ttc < emergency_replan_time_s`(1.0s，对齐原版 `fsm/emergency_time`) →
+     受约束制动；
+   - 失败但 ttc 充足 → 交常规 replanLoop 兜底。
+3. 新增参数 `emergency_replan_time_s=1.0`（两个 launch）。
 
 ## 4. 结果汇总
 
@@ -100,18 +112,20 @@ catkin_test_results --all build
 | 规划层固定 clearance | ✅ 代码+单测 | `calcSwarmCost` 固定 gate；`computeSafeClearance`/`safe_clearance_m`/`swarm_soft_margin` 删除 |
 | 周期碰撞检查 10Hz | ✅ 代码+单测 | `collisionCheckTick` 触发 replan；事件驱动删除 |
 | 生成即发 | ✅ 代码+单测 | 周期 5Hz 刷新删除；`traj_id` 提交时递增 |
-| 监督层/GPS bias/契约保留 | ✅ | `SafetyPredictor` 动态 EMERGENCY、`bias_valid_s`、intent 时间契约、PositionTarget 契约、旧 1m 门禁未动 |
-| 全量自动测试 | **232 tests, 0 errors, 0 failures** | ego 118 + executor + tcp_to_ros |
-| 双机正交 SITL | ⬜ 未执行 | 标定阻塞（bridge topic 转发链路，既有问题） |
-| 双机换位 SITL | ⬜ 未执行 | 同上 |
+| 监督层修订（对齐原版） | ✅ 代码+单测 | reaction 去 data_age；EMERGENCY 先重规划再急停（`emergency_replan_time_s=1.0`） |
+| 监督层/GPS bias/契约保留 | ✅ | `SafetyPredictor` EMERGENCY、`bias_valid_s`、intent 时间契约、PositionTarget 契约、旧 1m 门禁未动 |
+| 全量自动测试 | **234 tests, 0 errors, 0 failures** | ego 119 + executor + tcp_to_ros |
+| bridge 残留修复 | ✅ 验证 | cleanup/预检加 bridge 检查；标定不再卡死 |
+| 双机正交 SITL | ⚠️ 首次跑通链路 | UAV2 COMPLETED；UAV1 误制动（age 放大门槛）→ 监督层已修订，**待复测** |
+| 双机换位 SITL | ⬜ 未执行 | 监督层修订后一并复测 |
 | intent 停发注入 | ⬜ 未执行 | 同上 |
 
 ## 5. 遗留项（未验证/未解决）
 
-1. **双机同层正交/换位 SITL**（计划 §6.2 场景 1/2）与 **intent 停发注入**（场景 3）：待 bridge
-   topic 转发链路恢复后执行；验收判据：实际中心距 ≥1m、速度 ≤1.5m/s、无双方反复重规划振荡、
-   replan 次数无 10Hz 高频重复。
-2. **bridge topic 转发链路问题**：GCS 侧 bridge 有 publisher 但无数据流，UAV 侧 bridge 未订阅
-   本地 `/mavros/state`——既有环境行为，需单独排障（bridge_node.py 按需订阅注册时序）。
-3. **`planOnce` 耗时实测**（计划 §2.4 前提）：周期 100ms >> 单次 replan 耗时假设，需在恢复后的
-   SITL 运行中实测确认；若 >100ms 需降频或异步化。
+1. **双机正交/换位 SITL 复测**：监督层修订（去 age + 先重规划再急停）后需重跑
+   `reciprocal_15sitl.py` 验证 UAV1 不再误制动、两机实际中心距 ≥1m、无振荡。
+2. **intent 停发注入**（计划 §6.2 场景 3）：依赖缓冲轨迹的周期碰撞检查检出碰撞，待复测验证。
+3. **`planOnce` 耗时实测**（计划 §2.4 前提）：周期 100ms >> 单次 replan 耗时假设，需在 SITL
+   运行中实测确认。
+4. **takeoff 首跑时机失败**（startup 阶段 6 偶发）：active 重启后 MAVROS 未完全就绪，手动重跑
+   成功；可考虑 startup 增加 HOLD 模式确认等待。
