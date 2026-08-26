@@ -115,11 +115,15 @@ catkin_test_results --all build
 | 首跑（去 age + 先重规划） | UAV1 误制动（age 放大门槛，BRKAE_HOLD） | 动态门槛 3.9m > 预测窗 min_d 3.89m |
 | 二跑（+EMERGENCY 物理 1m 判定） | **UAV1 COMPLETED**、UAV2 HOLD_FAILED | 误制动消除；UAV2 cpa_d≈1.2m 触发动态门槛 → 持续 EMERGENCY→replan ping-pong → 规划失败收口 |
 | 三跑（EMERGENCY 物理 1m 判定后） | **UAV2 COMPLETED**、UAV1 EGO_PLAN_FAILED→HOLD_FAILED | **无误制动**；min_3d=2.59m（≥1m 安全达标）；UAV1 正交交叉无法规划穿越 UAV2 移动走廊 → 安全 HOLD |
+| 四跑（+SEQUENTIAL_START 首轮排序） | **UAV1(leader) COMPLETED**、UAV2 EGO_PLAN_FAILED→HOLD_FAILED | **确定性**：leader 先规划先完成（不再随机）；min_3d=4.26m ≥1m；UAV2 目标路径被 UAV1 航线阻挡（几何无解）→ 安全 HOLD |
 
-- 监督层修订**验证有效**：三跑均无 EMERGENCY 制动误触发、实际中心距 ≥1m（2.59-3.8m）。
-- 剩余 FAIL 根因：**正交同时交叉的任务完成性**——UAV1 须穿越 UAV2 沿 x=10 上下移动的走廊，
-  同刻采样下任何穿越时刻均 <1m 硬门；固定 clearance + 无变速/让路候选（L3 删 SLOW/FAST）→
-  无法生成穿越轨迹 → 规划失败 → 安全 HOLD（非避碰失败）。
+- 监督层修订**验证有效**：四跑均无 EMERGENCY 制动误触发、实际中心距 ≥1m（2.59-4.26m）。
+- **SEQUENTIAL_START 效果对比**（想法 1 验证）：
+  - 前三跑无排序：COMPLETED/FAILED 角色**随机**（UAV1 或 UAV2 交替）——首轮盲规划 + replan 无确定性
+  - 四跑有排序：**UAV1(leader) 确定先完成**，UAV2 基于 UAV1 轨迹规划——次序混乱消除
+- 剩余 FAIL 根因：**几何无解**——UAV2 目标 (10,13) 路径须穿越 UAV1 航线走廊 (y=5)；固定
+  clearance + 无变速/让路候选（L3 删 SLOW/FAST）→ 穿越不可行 → 规划失败 → 安全 HOLD。
+  这印证想法 2：**需要变速/让路能力（含 right-of-way）才能解决穿越被阻挡走廊**。
 
 ## 4. 结果汇总
 
@@ -132,15 +136,16 @@ catkin_test_results --all build
 | 监督层/GPS bias/契约保留 | ✅ | `SafetyPredictor` EMERGENCY、`bias_valid_s`、intent 时间契约、PositionTarget 契约、旧 1m 门禁未动 |
 | 全量自动测试 | **234 tests, 0 errors, 0 failures** | ego 119 + executor + tcp_to_ros |
 | bridge 残留修复 | ✅ 验证 | cleanup/预检加 bridge 检查；标定不再卡死 |
-| 双机正交 SITL | ⚠️ 三次复测 | 监督层误制动消除、中心距 ≥1m；剩余 UAV1 正交穿越规划失败（安全 HOLD） |
+| 双机正交 SITL | ⚠️ 四次复测 | 监督层误制动消除、中心距 ≥1m、首轮排序确定性生效；剩余 UAV2 穿越被阻挡走廊规划失败（安全 HOLD，几何无解） |
 | 双机换位 SITL | ⬜ 未执行 | 正交完成后可测 |
 | intent 停发注入 | ⬜ 未执行 | 同上 |
 
 ## 5. 遗留项（未验证/未解决）
 
-1. **正交同时交叉的任务完成性**：UAV1 无法规划穿越 UAV2 移动走廊（固定 clearance + 无让路候选）
-   → 规划失败安全 HOLD。需决策：a) 测试场景时序错开（一方先过）；b) 规划层恢复变速/等待能力；
-   c) 接受 HOLD 安全收口为预期行为。
+1. **穿越被阻挡走廊的几何无解**：UAV2 目标路径被 UAV1 航线阻挡（固定 clearance + 无变速/让路候选）
+   → 规划失败安全 HOLD。SEQUENTIAL_START 已保证 leader 确定性先完成；后续需决策：a) 测试场景时序
+   错开（一方先过）；b) 恢复变速/等待候选（SLOW/FAST + right-of-way，验证想法 2）；c) 接受 HOLD
+   安全收口为预期行为。
 2. **双机换位 SITL** 与 **intent 停发注入**（计划 §6.2 场景 2/3）：待正交场景方案确定后执行。
 3. **`planOnce` 耗时实测**（计划 §2.4 前提）：周期 100ms >> 单次 replan 耗时假设，需在 SITL
    运行中实测确认。
