@@ -170,9 +170,10 @@ GCS_A 必须：
 - **候选迭代（26082621 追加，A/B）**：STAND_ON 只生成 SLOW 变速候选（`slow_only`，非对称时序
   等待/加速）；常规规划成功但 min_clear <1.2m 也生成候选替换（裕度触发）；SLOW {0.5,0.8,1.2}
   含加速、LEFT/RIGHT {1.3,1.8,2.2}×{0.7,0.5}；验证门槛 1.3→1.2；cost=ΔT/T（绝对值）+dev/2.0。
-  全量 263 tests 0 failure。SITL 双机正交 6 轮复测：3 PASS / 3 FAIL（2 次 UAV1 速度 1.50-1.54
-  超速判定（加速档副作用）、1 次 UAV1 规划失败 HOLD）——双方 COMPLETED 率提升到 5/6，
-  0.605m 距离门禁事件消除；加速档速度余量待评估。
+  全量 263 tests 0 failure。SITL 双机正交复测：迭代 A/B + 速度判定放宽 1.5→2.5
+  （verification `--max-speed`，加速档 1.2 + PX4 超调实测 1.49-1.54）后 **8/9 PASS**
+  （仅 1 次 UAV1 规划失败 HOLD）；双方 COMPLETED 8/9（原始 3/5），min_3d 全程 ≥1.0m
+  （1.15-1.62m），0.605m 距离门禁事件消除。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；

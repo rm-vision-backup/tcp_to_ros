@@ -138,9 +138,21 @@ intent 发布到 `/neighbor_intent`）+ `.tmp/scripts/send_task_uav2.py`（任�
 
 - **A+B 有效提升任务成功率**：双方 COMPLETED 3/5 → 5/6；Run5 类 0.605m 距离门禁事件
   未再出现（本轮 min_3d 1.15-1.62m）。
-- **新 FAIL 源：加速档 1.2 副作用**——轨迹速度 ×1.2 + 加速度 ×1.44 → PX4 执行超调，
-  UAV1 实测速度 1.49-1.54 逼近/超过 1.5 判定上限（3 轮触发，其中 2 轮因此 FAIL）。
-  **加速档速度余量待决策**（降档 1.1 / 保留 1.2 接受判定 / clamp 轨迹速度留余量）。
+- **加速档 1.2 副作用 → 用户决策：判定阈值 1.5 → 2.5 m/s**（`reciprocal_15sitl.py
+  --max-speed`，verification 脚本不入 git；规划层 `max_velocity_mps=1.5`/`max_vel=1.0`
+  速度约束不变）。加速档轨迹速度 1.2 + PX4 执行超调实测 1.49-1.54，判定放宽后不再 FAIL。
 - Run C 类 UAV1 规划失败仍存在（STAND_ON SLOW 未能救活全部场景；诊断日志已加
   `yield replan: no valid candidate` 待下次采集）。
+
+### 9.5 判定放宽后复测（Run G/H/I，3/3 PASS）
+
+| 轮 | 结果 | min_3d | UAV1/UAV2 速度 |
+|---|---|---|---|
+| G | **PASS** | 1.239m | 1.105 / 1.085 |
+| H | **PASS** | 1.411m | 1.472 / 1.322 |
+| I | **PASS** | 1.564m | 1.067 / 1.099 |
+
+**汇总（迭代 A/B + 判定 2.5）**：9 轮中 **8 PASS**（仅 Run C 一机规划失败 HOLD）；
+双方 COMPLETED 8/9（原始版 3/5）。min_3d 全程 ≥1.0m（1.15-1.62m），无距离门禁事件。
+
 
