@@ -318,3 +318,25 @@ cost = ΔT/T_nominal + dev/2.0      # ΔT：SLOW 延长秒数（LEFT/RIGHT 为 0
 - `collisionCheckTick` 为唯一候选触发源，SafetyPredictor 仅 EMERGENCY；
 - 全量自动测试 0 failure；SEQUENTIAL_START/固定 clearance/生成即发不回归。
 
+### 10.9 候选生成修订：时空驱动 + plateau 偏移（方案 v2，2026-08-26）
+
+**背景**：SITL 第 6 跑（方案 A）暴露两个问题——
+1. **偏移方向错误**：LEFT/RIGHT 用本机轨迹切线法向，正交场景 UAV2 法向沿 x（与 UAV1 的 y=5 走廊平行）→ 偏移无效；
+2. **偏移长度不足**：raised-cosine 尖峰窗口太短，UAV2 未掠过冲突段就回落原路径（max_dev 0.98m、min_3d 0.68m）。
+
+**修订设计**（用户确认）：
+
+| 项 | 设计 |
+|---|---|
+| **安全判据** | **时空轨迹不重叠**：`∀t ||self(t)-peer(t)|| ≥ 1.3m`（时刻+位置+1.3m 球，同刻采样）。候选目标 = 让本机时空轨迹与邻机无交集 |
+| **SLOW** | 时间缩放 `scale ∈ {0.7, 0.5}` → 穿越时刻后移，错开 peer 时空轨迹（移动前机主解）。**不强制 SLOW 优先**，由 cost 自然偏向 |
+| **LEFT/RIGHT 方向** | `n_avoid` = 远离 peer 在时空重叠时段的平均位置（`normalize((self_avg - peer_avg) 水平)`）；`|self-peer|<1e-3` 退回切线法向 |
+| **LEFT/RIGHT 偏移窗口** | **时空重叠时段** `{t \| dist(t) < 1.3m}` 的包络 `[t_a, t_b]` + C2 过渡：plateau 覆盖 `[t_a, t_b]`（偏移全程持续），过渡区 `T_trans` 内 C2 缓变 0↔1 |
+| **组合减速** | LEFT/RIGHT 可叠加 `scale_wait ∈ {1.0, 0.7}`（绕行+等待） |
+| **cost** | `cost = ΔT/T_nominal + dev/1.5`（SLOW dev=0 → 自然偏向 SLOW；dev 权重增大） |
+| **速度 ≤1.5 驱动时间轴** | 候选几何后计算 `v_max`，若 >1.5 整体时间缩放 `scale_vel = 1.5/v_max`（`vel·scale_vel`、`acc·scale_vel²`）——速度限制用于**生成时间轴**，非分解校验 |
+| **候选集** | SLOW(2) + LEFT(3 档 × 2 等待) + RIGHT(3 × 2) ≈ 14 条 |
+| **时间轴复合** | 最终时间轴 = `scale_wait × scale_vel`（SLOW 仅 `scale × scale_vel`） |
+
+**实施**：重构 `yield_candidates`（重叠时段计算、plateau 偏移、速度驱动时间轴、cost），`collisionCheckTick` 与 `tryYieldReplan` 共用；更新单测；SITL 复测正交/悬停。
+
