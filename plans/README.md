@@ -166,12 +166,13 @@ GCS_A 必须：
   0.2m（复盘放宽，PX4 SITL 稳态偏差 0.13-0.17m，0.1m 太紧）/ 定时 1.0s）全部只置位唤醒
   replanLoop（条件变量，唯一提交者）；EMERGENCY 监督回调只置 `emergency_pending_`，制动由
   replan 线程在"常规 replan 失败且 ttc <1.0s"时提交（EMERGENCY_BRAKE → BRAKE_HOLD），否则收口
-  PLAN_FAILED；候选 SLOW{0.5,0.3}/LEFT-RIGHT{1,1.5,2}×{0.7,0.5} 只在 replan 失败分支生成；删
-  POSE_STALE（HOLD 锁存位置）；`waypoint_densify_spacing=3.0`。全量 257 tests 0 failure。
-  SITL 双机正交 5 轮：2 PASS（Run2/4 双方 COMPLETED，min_3d 1.38/1.52m）/ 3 FAIL（Run1 UAV1
-  规划失败安全 HOLD、Run3 staging 到达 HOLD 已由 0.2m 修复、Run5 0.605m 触发 executor 距离门禁
-  安全 HOLD）——正交交叉为竞争（互惠收敛未完成，遗留）。EMERGENCY 注入端到端验证 PASS
-  （BRAKE_HOLD 由 replan 线程提交）。
+  PLAN_FAILED；删 POSE_STALE（HOLD 锁存位置）；`waypoint_densify_spacing=3.0`。
+- **候选迭代（26082621 追加，A/B）**：STAND_ON 只生成 SLOW 变速候选（`slow_only`，非对称时序
+  等待/加速）；常规规划成功但 min_clear <1.2m 也生成候选替换（裕度触发）；SLOW {0.5,0.8,1.2}
+  含加速、LEFT/RIGHT {1.3,1.8,2.2}×{0.7,0.5}；验证门槛 1.3→1.2；cost=ΔT/T（绝对值）+dev/2.0。
+  全量 263 tests 0 failure。SITL 双机正交 6 轮复测：3 PASS / 3 FAIL（2 次 UAV1 速度 1.50-1.54
+  超速判定（加速档副作用）、1 次 UAV1 规划失败 HOLD）——双方 COMPLETED 率提升到 5/6，
+  0.605m 距离门禁事件消除；加速档速度余量待评估。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；

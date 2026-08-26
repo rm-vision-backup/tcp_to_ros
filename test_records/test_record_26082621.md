@@ -103,3 +103,44 @@ intent 发布到 `/neighbor_intent`）+ `.tmp/scripts/send_task_uav2.py`（任�
 4. **takeoff 首跑偶发时序失败**：active 重启后 MAVROS 未完全就绪，手动重跑成功（既有）。
 5. **catkin test flaky**：`test_ego_state_machine` 内部 roscore 端口 11411 偶发被残留占用。
 
+
+## 9. 迭代 A/B（候选机制增强，2026-08-26 23:xx）
+
+### 9.1 修改内容（用户确认）
+
+1. **A：STAND_ON replan 失败 → 只生成 SLOW 变速候选**（`tryYieldReplan` 低 ID 不再直接
+   `return false`，改 `generate(..., slow_only=true)` 只产 SLOW，不横向偏移）；
+2. **B：常规规划成功但 min_clear < clearance_factor×1m=1.2m → 也生成候选替换**
+   （`replanOnce` 在 safe_candidate 后加裕度检查，候选失败保持原轨迹不 PLAN_FAILED）；
+3. **SLOW 档位 {0.5, 0.8, 1.2}**（含加速；速度约束 v_max×factor ≤1.5，ΔT 取绝对值）；
+4. **LEFT/RIGHT lateral {1.3, 1.8, 2.2}**（scale_wait {0.7, 0.5} 不变）；
+5. **验证门槛 yield_clearance_factor 1.3 → 1.2**；**cost = ΔT/T（绝对值）+ dev/2.0**。
+
+### 9.2 单元测试
+
+- 全量 **263 tests, 0 errors, 0 failures**（新增 slow_only、加速档速度约束、B 裕度触发）。
+- 新增 `SlowOnlyGeneratesOnlySlowForStandOn`、`SlowAccelerateGearDoesNotExceedSpeedLimit`
+  （yield_candidates）；`ReplanWithLowClearanceMarginCommitsCandidate`（state machine）。
+
+### 9.3 SITL 双机正交复测（与 §3 原始版对比）
+
+| 轮 | 原始版（§3） | 迭代 A/B |
+|---|---|---|
+| A | — | **PASS**（min_3d 1.414m，速度 1.11/1.07） |
+| B | — | FAIL（UAV1 实测速度 1.504 超 1.5 判定；两机 COMPLETED） |
+| C | — | FAIL（UAV1 规划失败 → HOLD，min_3d 1.149m 安全） |
+| D | — | **PASS**（min_3d 1.533m，UAV1 速度 1.487） |
+| E | — | FAIL（UAV1 实测速度 1.539 超 1.5；两机 COMPLETED） |
+| F | — | **PASS**（min_3d 1.617m，UAV1 速度 1.409） |
+| 汇总 | 2/5 PASS；3 轮双方 COMPLETED | **3/6 PASS；5 轮双方 COMPLETED** |
+
+### 9.4 结论
+
+- **A+B 有效提升任务成功率**：双方 COMPLETED 3/5 → 5/6；Run5 类 0.605m 距离门禁事件
+  未再出现（本轮 min_3d 1.15-1.62m）。
+- **新 FAIL 源：加速档 1.2 副作用**——轨迹速度 ×1.2 + 加速度 ×1.44 → PX4 执行超调，
+  UAV1 实测速度 1.49-1.54 逼近/超过 1.5 判定上限（3 轮触发，其中 2 轮因此 FAIL）。
+  **加速档速度余量待决策**（降档 1.1 / 保留 1.2 接受判定 / clamp 轨迹速度留余量）。
+- Run C 类 UAV1 规划失败仍存在（STAND_ON SLOW 未能救活全部场景；诊断日志已加
+  `yield replan: no valid candidate` 待下次采集）。
+
