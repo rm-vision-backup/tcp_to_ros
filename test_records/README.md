@@ -16,9 +16,9 @@
 **约定：自主测试一律使用无头**（`multi_uav_ego_15sim.launch gui:=false`）——避免 GUI 依赖与人工
 操作，便于连续回归；**有头仅在需要 QGC/可视化人工观察或排障时使用**，两者启动链一致。
 
-## 2. 完整启动流程（无头/有头共通，阶段 0→8）
+## 2. 完整启动流程（无头/有头共通，阶段 0→7）
 
-> 推荐用 §3.1 `startup_ego_sitl.sh` 一键执行阶段 0→6；以下为各阶段人工执行的等价步骤。
+> 推荐用 §3.1 `startup_ego_sitl.sh` 一键执行阶段 0→5；以下为各阶段人工执行的等价步骤。
 
 ### 阶段 0：预检
 ```bash
@@ -34,10 +34,12 @@ bash .tmp/headless_test/run.sh sim          # gui:=false, master 11300, gazebo 1
 # 等待：15 个 px4 进程 + 日志 Spawn status = 15
 ```
 
-### 阶段 2：机载层（15 机独立 Master）
+### 阶段 2：机载层（15 机独立 Master，**统一 active 一次性启动，不重启**）
 ```bash
-bash .tmp/headless_test/run.sh onboard      # 等价 startup_offboard_ego.sh 1..15
+# 15 机 MAVROS + executor 以统一监督模式一次性启动（默认 active，不再 shadow→active 重启）
+EGO_SAFETY_SUPERVISOR_MODE=active bash .tmp/headless_test/run.sh onboard
 # 等待：02_onboard.log 中 "ready UAV" 达 15（11311..11325）
+# 全部 15 机必须在同一次启动中 ready；不得对单机/子集做"重启/补启"。
 ```
 
 ### 阶段 3：GCS（bridge → backend → tcp，顺序避免 11310 竞态）
@@ -56,21 +58,17 @@ rostopic echo -n 1 /group_a/calibration_ready   # 期望 data: True
 > 标定要求 A01-A06 全 disarm + 数据连续 2s + 航向 ≤30°；**armed 时 set_gp_origin 被拒**，
 > 因此必须先标定再 takeoff。
 
-### 阶段 5：active 重启测试机（仅避碰专项需要；shadow 可跳过）
-```bash
-EGO_SAFETY_SUPERVISOR_MODE=active \
-  bash src/safe_valley_exp/startup_offboard_ego.sh 1 2    # 示例：测试机 1、2
-# 等待测试机 ready；重启后坐标系保持统一（gp_origin latch）
-```
-
-### 阶段 6：起飞
+### 阶段 5：起飞
 ```bash
 python3 src/safe_valley_exp/scripts/offboard_takeoff_15.py 1..15
 # HOLD → arm → OFFBOARD；软起飞 z≈5m 由 ego TAKEOFF 状态自动完成
 # 等待各机高度 >3m
 ```
 
-### 阶段 7：测试
+> 已无"active 重启测试机"步骤：机载层在阶段 2 已统一 active 启动，
+> 任何时刻不得再对机载层做 stop/start 单机或子集重启（会产生状态不同步）。
+
+### 阶段 6：测试
 ```bash
 # 批次任务（GCS TCP 全链路）
 python3 references/runtime/task_test.py --backend tcp --group A --task prepare --timeout-s 180
@@ -80,23 +78,27 @@ ROS_MASTER_URI=http://localhost:11310 python3 verification/ego_smoke/reciprocal_
   --execute --confirm-sitl I_UNDERSTAND_SITL
 ```
 
-### 阶段 8：清理
+### 阶段 7：清理与生命周期收口（**强制**）
 ```bash
 bash .tmp/headless_test/cleanup.sh           # 逆序停止 TCP→GCS→onboard→sim + 残留检查
-# 断言：gazebo/px4/rosmaster/mavros 进程数 = 0
+# 断言：gazebo/px4/rosmaster/mavros 进程数 = 0；测试端口（39001/11300/11310..11325）全部释放
 ```
+- **测试结束（无论 PASS / FAIL / 超时）必须立即执行本阶段**；
+- **禁止任何"就地恢复 / 单机重启 / 二次启动"动作**——需要重跑一律先 cleanup 断言无残留，
+  再回到阶段 0 整体干净重启（`startup_ego_sitl.sh`）。
 
 ## 3. 套壳脚本（从仿真层到软起动）
 
 ### 3.1 `startup_ego_sitl.sh`（一键，推荐）
 ```bash
 bash .tmp/scripts/startup_ego_sitl.sh [UAV_LIST] [SAFETY_MODE]
-# 默认 UAV_LIST="1 2"、SAFETY_MODE=active
+# 默认 UAV_LIST="1 2"（takeoff 测试机；批次任务传 "1 2 ... 15"）、SAFETY_MODE=active
 ```
-- 自动执行 **阶段 0→6**：预检 → sim → onboard → gcs(bridge→backend) → 标定 →
-  active 重启测试机 → takeoff → 各机高度确认；
+- 自动执行 **阶段 0→5**：预检 → sim → onboard（15 机**统一 SAFETY_MODE 一次性启动，不重启**）→
+  gcs(bridge→backend) → 标定 → takeoff → 各机高度确认；
 - 每步轮询就绪（`wait_until`），任一步失败即退出非零；
-- **失败后整体干净重启**（先 `cleanup.sh` 再重跑脚本），**不就地重试 offboard**；
+- **失败后整体干净重启**（先 `cleanup.sh` 断言无残留，再重跑脚本），**不就地重试 offboard、
+  不单机/子集重启机载层**；
 - 成功输出 READY + reciprocal 执行命令。
 
 ### 3.2 `headless_test/run.sh`（分阶段编排）
@@ -124,12 +126,45 @@ bash .tmp/headless_test/run.sh <phase>
    MAVROS local 各自为原点，机间距离会虚近。
 3. **GCS bridge 先启动再 backend**：两者竞争 11310 端口；先 bridge（等 `/UAV1/uav_task` 服务），
    再 backend，避免 bridge 起不来导致服务代理缺失。
-4. **失败后整体干净重启**：不就地重试 offboard；先 `cleanup.sh` 再 `startup_ego_sitl.sh`。
-5. **active 模式仅用于避碰专项测试机**：生产/常规任务保持 shadow；active 冻结期遵循
-   `plans/implementation_plan_26082500.md` 缺陷清单门禁。
+4. **失败后整体干净重启，绝不就地恢复**：不重试 offboard、**不单机/子集重启机载层**；
+   先 `cleanup.sh` 断言无残留，再 `startup_ego_sitl.sh` 从阶段 0 整体重来。
+5. **机载层统一 active 一次性启动**：不再区分 shadow/active、不再"active 重启测试机"；
+   `startup_ego_sitl.sh` / 阶段 2 以 `EGO_SAFETY_SUPERVISOR_MODE=active` 启动全部 15 机，
+   任一机 ready 缺失即判定本次启动失败（整体重来），不补启。
 6. **无头环境变量**：`LIBGL_ALWAYS_SOFTWARE=1`（env.sh 已设置）；机载层日志重定向
    `ROS_HOME=$WS/.ros_home`。
 7. **残留检查**：每次测试结束断言 gazebo/px4/rosmaster/mavros 进程 0、测试端口
    （39001/11300/11310..11325）全部释放。
 8. **任务前坐标复核**：12 机 prepare 前确认 GCS 统一 local 坐标 + 实测初始间距；
    历史近距异常（0.47–0.85m）优先判定为原点/启动流程故障并拒绝发任务。
+
+## 5. 测试生命周期铁律（agent 必读）
+
+> 目的：杜绝"测试结束后 agent 尝试再次启动/重启/恢复进程"导致状态异常、节点意外退出。
+> **agent 只允许在 `startup_ego_sitl.sh` 的一次性启动流程内启动进程；启动流程之外的一切
+> 启动/重启/就绪轮询动作一律禁止。**
+
+1. **测试结束即收口**：无论 PASS / FAIL / 超时，测试脚本返回后**立即**执行
+   `cleanup.sh` 停止全部进程并断言无残留；不得延迟、不得等待。
+2. **结束后禁止自动重启**：cleanup 之后 agent **不得**自动再启动仿真/机载层/GCS/TCP 中任何
+   组件；不得对单机做"就绪检查 → 补启/重启"（如 `startup_offboard_ego.sh <idx>` 单独重启）。
+3. **重跑必须整体重来**：需要重跑测试时，先确认无残留（`cleanup.sh` + 进程/端口断言），
+   再从 `startup_ego_sitl.sh` 阶段 0 一次性启动；**禁止在部分进程存活的环境上追加启动**。
+4. **就地恢复即违规**：测试中某机载层节点意外退出时，**不得**就地重启该机；先整体
+   `cleanup.sh`，将退出现象与日志记入测试记录，再从干净环境重跑。
+5. **单机故障判定**：测试中某机异常（如 EGO_PLAN_FAILED / MIN_DISTANCE_BREACH / 节点退出），
+   属于被测对象行为，**先记录、再整体收口**；禁止"修好它继续跑"。
+
+## 6. 机载层节点意外退出（已知风险与处理）
+
+- **现象**（26082700 实测 UAV1/UAV8）：某机 `uav_executor_UAVn` 收到 SIGINT 退出 →
+  roslaunch `required=true` 连带关闭整个机载层 launch（MAVROS/driver/bridge 全退）→
+  offboard loss → PX4 自动 LAND。
+- **诱因**：GCS backend 经 swarm_topology_bridge 转发 service（`/UAVn/uav_hold` 等）偶发
+  超时（bridge service 转发脆弱，高并发时更明显）；极端情况下 executor 异常退出。
+- **预防**：
+  1. 机载层统一 active 一次性启动（消除 shadow→active 重启引入的竞态/时序窗口）；
+  2. 启动后固定轮询 15/15 `ready` 再进入下一步，不抢跑；
+  3. 任务中不做任何机载层层面的操作（重启/参数注入/单机命令）。
+- **处理**：出现即整体 `cleanup.sh` 收口 → 记录退出日志（`.ros_home/log/<会话>/uav_executor_UAVn-*.log`、
+  `rosout.log`）→ 从干净环境重跑；**绝不就地重启该机**。
