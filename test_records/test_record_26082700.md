@@ -86,12 +86,21 @@
    （制动/fallback）提交后 `plan_fail_since_` 清空——恢复后旧失败累计不直接收口。
 5. **cost 惩罚降低**（`yield_candidates.cpp`）：LEFT/RIGHT 候选 `dev/2.0` → **`dev/5.0`**
    （横向让路代价更小，更易选中横向绕行而非撞墙）。
+6. **悬停判定放宽**（`yield_candidates.h`）：`hovering_velocity_mps` 0.1 → **0.2**
+   （邻机末速 <0.2m/s 判近似悬停 → 跳过 SLOW，更贴合编队低速场景）。
 
-### 3.2 全组 HOLD（backend，已存在无需改）
+### 3.2 全组 HOLD（backend）
 
 - 任一机 executor 上报 `FAILED` → backend `_on_status` 记入 `failed_uavs` →
   `_wait_for_terminal` break → `_safe_hold`（对全部 accepted + 非 terminal 活动机并发
   `/UAVn/uav_hold`）。26082700 实测 A02/A05 EGO_PLAN_FAILED 后整组安全收口即此链路。
+- **26082700 补充修复**（backend `_safe_hold` 分批重试）：
+  - 实测中 A12 `/UAV12/uav_hold` **经 bridge service 转发超时**（UAV12 executor 无
+    HOLD 请求记录）→ 该机未确认 HOLD；
+  - 修改：`_safe_hold` **每批 4 机**下发（`hold_batch_size`，降低 bridge 并发负载）、
+    **0.5s 间隔重试 2 次**（`hold_retry_count`/`hold_retry_interval_s`，bridge 瞬时
+    超时恢复）；单测 `test_safe_hold_batches_and_retries`（6 机 4+2 两批 + UAV5
+    首败重试成功，最终全部确认）。
 
 ### 3.3 单元测试
 

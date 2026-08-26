@@ -66,6 +66,11 @@ DEFAULT_CONFIRM_WAIT_S = 1.0
 DEFAULT_CONFIRM_RETRIES = 2
 DEFAULT_CONFIRM_RETRY_INTERVAL_S = 0.2
 DEFAULT_CONFIRM_DEADLINE_S = 4.0
+# Group HOLD fan-out: batch size + retries (0.5s apart) to survive transient
+# bridge service forwarding timeouts (26082700: A12 /uav_hold timed out).
+DEFAULT_HOLD_BATCH_SIZE = 4
+DEFAULT_HOLD_RETRY_COUNT = 2
+DEFAULT_HOLD_RETRY_INTERVAL_S = 0.5
 
 STATE_ACCEPTED = "ACCEPTED"
 STATE_COMPLETED = "COMPLETED"
@@ -152,6 +157,15 @@ class GcsABackendNode:
         )
         self.confirm_deadline_s = float(
             rospy.get_param("~confirm_deadline_s", DEFAULT_CONFIRM_DEADLINE_S)
+        )
+        self.hold_batch_size = int(
+            rospy.get_param("~hold_batch_size", DEFAULT_HOLD_BATCH_SIZE)
+        )
+        self.hold_retry_count = int(
+            rospy.get_param("~hold_retry_count", DEFAULT_HOLD_RETRY_COUNT)
+        )
+        self.hold_retry_interval_s = float(
+            rospy.get_param("~hold_retry_interval_s", DEFAULT_HOLD_RETRY_INTERVAL_S)
         )
 
         self.identity_map = IdentityMap.load(self.identity_map_path)
@@ -878,7 +892,14 @@ class GcsABackendNode:
     def _safe_hold(
         self, state: GroupState, reason: str, skip: Optional[List[str]] = None
     ) -> None:
-        """Concurrent HOLD across active (accepted, not terminal) UAVs."""
+        """Batched, retrying concurrent HOLD across active (accepted, not terminal) UAVs.
+
+        Fan-out is split into batches of hold_batch_size (default 4) to avoid
+        saturating the bridge service forwarding (26082700: 12 concurrent
+        /uav_hold calls timed out on A12). Unconfirmed members of each batch
+        are retried hold_retry_count times (default 2) with a
+        hold_retry_interval_s (0.5s) gap to survive transient bridge timeouts.
+        """
         with state.lock:
             candidates = [
                 uav_id
@@ -892,9 +913,8 @@ class GcsABackendNode:
                 return
             state.hold_pending.extend(candidates)
 
-        lock = threading.Lock()
-
-        def hold_one(uav_id: str) -> None:
+        def hold_one(uav_id: str, accepted: set, rejected: dict,
+                     lock: threading.Lock) -> None:
             exec_target = state.exec_by_uav[uav_id]
             service_name = "/{}/{}".format(exec_target, HOLD_SERVICE_SUFFIX)
             request = UavHoldRequest()
@@ -915,28 +935,46 @@ class GcsABackendNode:
                 response = outcome.response
                 with lock:
                     if response.accepted:
+                        accepted.add(uav_id)
                         state.held.append(uav_id)
                     else:
-                        state.hold_rejected.append(uav_id)
-                        rospy.logwarn(
-                            "HOLD rejected for %s: %s %s",
-                            uav_id,
-                            response.error_code,
-                            response.message,
+                        rejected[uav_id] = "{}: {}".format(
+                            response.error_code, response.message
                         )
             except rospy.ServiceException as exc:
                 with lock:
-                    state.hold_rejected.append(uav_id)
-                rospy.logwarn("HOLD failed for %s: %s", uav_id, exc)
+                    rejected[uav_id] = str(exc)
 
-        threads = [
-            threading.Thread(target=hold_one, args=(uav_id,), daemon=True)
-            for uav_id in candidates
-        ]
-        for thread in threads:
-            thread.start()
-        for thread in threads:
-            thread.join(timeout=self.confirm_wait_s + 1.0)
+        for start in range(0, len(candidates), self.hold_batch_size):
+            batch = candidates[start:start + self.hold_batch_size]
+            pending = list(batch)
+            for attempt in range(self.hold_retry_count + 1):
+                if not pending:
+                    break
+                lock = threading.Lock()
+                accepted: set = set()
+                rejected: dict = {}
+                threads = [
+                    threading.Thread(
+                        target=hold_one, args=(uav_id, accepted, rejected, lock),
+                        daemon=True,
+                    )
+                    for uav_id in pending
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=self.confirm_wait_s + 1.0)
+                if attempt < self.hold_retry_count:
+                    # 0.5s 后重试本批仍未确认的机。
+                    time.sleep(self.hold_retry_interval_s)
+                    pending = [
+                        uav_id for uav_id in pending if uav_id not in accepted
+                    ]
+            for uav_id, detail in rejected.items():
+                state.hold_rejected.append(uav_id)
+                rospy.logwarn("HOLD failed for %s after %d retries: %s",
+                              uav_id, self.hold_retry_count, detail)
 
         with state.lock:
             if state.hold_rejected:

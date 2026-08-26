@@ -37,6 +37,10 @@ def make_state(uav_id, exec_target, status, seq):
 class GcsAAggregationTest(unittest.TestCase):
     def setUp(self):
         self.node = MODULE.GcsABackendNode.__new__(MODULE.GcsABackendNode)
+        # _safe_hold 分批/重试参数（__new__ 跳过 __init__，此处显式声明）。
+        self.node.hold_batch_size = 4
+        self.node.hold_retry_count = 2
+        self.node.hold_retry_interval_s = 0.5
         self.state = MODULE.GroupState(
             mission_id="mission-1",
             command_id="command-1",
@@ -84,6 +88,45 @@ class GcsAAggregationTest(unittest.TestCase):
         # 机载层统一使用执行层 UAVn 命名；A01 -> UAV1。
         self.assertEqual(["UAV1"], captured)
         self.assertEqual(["A01"], self.state.held)
+
+    def test_safe_hold_batches_and_retries(self):
+        # 26082700 修复：>batch_size 台机分批下发（每批 hold_batch_size），
+        # 未确认机按 hold_retry_interval_s 重试 hold_retry_count 次，最终全部确认。
+        state = MODULE.GroupState(
+            mission_id="mission-1", command_id="command-1", command="MOVE_TO",
+            uav_ids=["A01", "A02", "A03", "A04", "A05", "A06"],
+            exec_by_uav={"A01": "UAV1", "A02": "UAV2", "A03": "UAV3",
+                         "A04": "UAV4", "A05": "UAV5", "A06": "UAV6"},
+            start_time=0.0,
+        )
+        state.started_uavs = ["A01", "A02", "A03", "A04", "A05", "A06"]
+        self.node.confirm_wait_s = 0.01
+        self.node.hold_batch_size = 4
+        self.node.hold_retry_count = 2
+        self.node.hold_retry_interval_s = 0.01
+        calls = []
+        first_fail = {"UAV5"}
+
+        def fake_call(_proxy, request, _timeout):
+            calls.append(request.uav_id)
+            if request.uav_id in first_fail:
+                first_fail.remove(request.uav_id)  # 首次调用 bridge 超时
+                return MODULE._CallOutcome(
+                    exception=MODULE.rospy.ServiceException("bridge timeout"))
+            response = type("Response", (), {"accepted": True})()
+            return MODULE._CallOutcome(response=response)
+
+        self.node._call_service_with_timeout = fake_call
+        self.node._safe_hold(state, "test")
+        # 6 台 → 4+2 两批；UAV5 在第二批首次失败，0.5s 间隔后重试成功。
+        self.assertEqual(calls[:4], ["UAV1", "UAV2", "UAV3", "UAV4"])
+        self.assertEqual(calls.count("UAV5"), 2)  # 首次超时 + 重试成功
+        self.assertIn("UAV6", calls)
+        self.assertEqual(
+            sorted(state.held),
+            ["A01", "A02", "A03", "A04", "A05", "A06"],
+        )
+        self.assertEqual(state.hold_rejected, [])
 
     def test_late_service_response_remains_timed_out(self):
         def late_proxy(_request):
