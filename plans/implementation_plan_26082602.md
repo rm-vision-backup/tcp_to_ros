@@ -211,3 +211,110 @@
 - 监督层 EMERGENCY 动态门槛与 GPS bias 修正保留；
 - 双机正交/换位 SITL 中心距 ≥1m、无振荡；全量自动测试 0 failure。
 
+---
+
+## 10. 机间 3 候选让路机制（SLOW/LEFT/RIGHT + right-of-way）扩展计划
+
+时间：2026-08-26
+状态：**代码+单测已实施（2026-08-26）；SITL 正交/悬停/换位验收待执行**
+
+### 10.1 背景与决策依据
+
+- **SITL 四次复测结论**：SEQUENTIAL_START 已解决首轮排序确定性（UAV1 leader 先完成），
+  但 UAV2 穿越被 UAV1 航线阻挡的走廊时 **几何无解**（固定 clearance 硬门拒绝一切穿越轨迹）
+  → `EGO_PLAN_FAILED` → 安全 HOLD。规划层"重规划"在无解时无效，需要**让路候选**（时间错开 /
+  横向绕行）。
+- **对齐原版触发**：原版 20Hz `checkCollisionCallback`（检测当前轨迹 vs 邻机当前时刻 → 重规划/
+  急停）是唯一监督触发。我们把让路候选放 `collisionCheckTick`（10Hz），SafetyPredictor 只留
+  EMERGENCY 制动（先重规划再急停），**消除 25Hz 预测触发与 10Hz 硬检测的重叠与竞争**。
+- **候选来源不能照搬原版 distinctiveTrajs**（那是环境障碍拓扑，机间无 grid_map）；机间候选
+  用 SLOW（时间错开）/ LEFT/RIGHT（横向绕行），针对"前机移动短暂占用"与"前机悬停长期占用"。
+
+### 10.2 机制设计（已确认）
+
+| 项 | 设计 | 确认 |
+|---|---|---|
+| **触发** | `collisionCheckTick`（10Hz）：`current_` vs fresh 邻机同刻最小距离 < **1.3×clearance**（1.3m）→ 进入候选流程 | 用户确认 |
+| **right-of-way** | `parseNumericId` 数字比较：低 ID `STAND_ON`（保持 nominal，交常规 replan），高 ID `YIELD`（生成候选）；episode 内锁存角色与方向 | 用户确认 |
+| **SLOW** | 几何不变，时间轴缩放 `[0.3, 1.0]`（`t'=t/scale`、`vel'=vel·scale`、`acc'=acc·scale²`）；**悬停前机（邻机末段速度≈0）跳过 SLOW** | 用户确认 |
+| **LEFT/RIGHT** | 横向 C2 包络偏移（法向 raised-cosine，峰值 ≤2.0m），**时间轴不变**（解析 P/V/A：`vel'=vel+n·dw/dt`、`acc'=acc+n·d²w/dt²`）；动力学校验（v≤1.5m/s） | 用户确认 |
+| **选择** | 安全门槛 `min_clear ≥ 1.3×clearance`（全时域 vs 全部 fresh 邻机）→ `cost = ΔT/T_nominal + dev/2.0`（SLOW 只 ΔT、LEFT/RIGHT 只 dev）→ **cost 最小** | 用户确认 |
+| **失败链** | SLOW→LEFT→RIGHT→全失败 → `planning_requested_`（常规 replan）→ 失败 EGO_PLAN_FAILED / EMERGENCY 制动 | — |
+| **与监督层** | SafetyPredictor 只留 EMERGENCY（先重规划再急停）；WARNING 级仅诊断，不触发候选 | 用户确认 |
+| **保留** | SEQUENTIAL_START 首轮排序、生成即发、固定 clearance 硬门、GPS bias 修正 | — |
+
+### 10.3 候选生成器 `YieldCandidateGenerator`
+
+```
+输入：current_（本机执行轨迹）、fresh 邻机（绝对 epoch，rebase 后）、right-of-way、配置
+输出：候选列表（每条含轨迹 + min_clear + cost）
+
+SLOW   ：pts 不变，t'=t/scale（scale ∈ [slow_min_scale, 1.0]，按需要错开的时长取）
+         vel'=vel·scale, acc'=acc·scale²；若 primary peer 悬停（末速<0.1m/s）→ 跳过
+LEFT   ：冲突窗口（min_clear 所在时间区间）内法向（切线左旋 90°）× raised-cosine
+         包络（峰值 ≤ lateral_max_m=2.0），窗口外 w=0；t 不变；vel/acc 解析叠加
+RIGHT  ：同 LEFT，法向右旋 90°
+
+每条候选验证（全部通过才算可行）：
+  ① 全时域 vs 全部 fresh 邻机同刻 min_clear ≥ clearance_factor×swarm_clearance×2 (=1.3m)
+  ② 速度 ≤ max_velocity_mps(=1.5)、加速度 ≤ max_acc×1.05、jerk/finite
+  ③ P/V/A 起点连续（等于当前轨迹同刻值）、时间单调
+
+cost = ΔT/T_nominal + dev/2.0      # ΔT：SLOW 延长秒数（LEFT/RIGHT 为 0）
+                                   # dev：横向偏移峰值米（SLOW 为 0）
+选 cost 最小；同 cost 按固定枚举 SLOW>LEFT>RIGHT
+```
+
+### 10.4 触发与提交（node 集成）
+
+- `collisionCheckTick` 升级：
+  1. 计算 `min_clear`（current_ vs fresh 邻机）；
+  2. `min_clear ≥ 1.3m` → 安全，返回；
+  3. `< 1.3m` → 确定 primary peer（冲突最近邻机）+ right-of-way：
+     - 本机 `STAND_ON`（ID > peer）→ `planning_requested_=true`（常规 replan 兜底）；
+     - 本机 `YIELD`（ID < peer）→ 生成候选；`yield_committed_` 且方向锁存时
+       不重复生成（除非邻机版本/角色变化）；候选成功 → 提交发布（publishIntent active）；
+       全失败 → `planning_requested_=true`。
+- episode 锁存：`ConflictEpisode` 语义——YIELD 已提交且预测仍安全 → 保持；邻机更新或
+  候选恶化 → 重新评估（方向优先 → 换方向 → 制动）。
+- SafetyPredictor：EMERGENCY 处理不变（先 replan 再急停）；WARNING 仅日志。
+
+### 10.5 文件级改动预期
+
+- `ego_planner_driver/include/ego_planner_driver/yield_candidates.h`（新增）
+- `ego_planner_driver/src/yield_candidates.cpp`（新增）
+- `ego_planner_driver/include/ego_planner_driver/ego_planner_driver_node.h`：
+  `yield_config_`/`yield_committed_`/`yield_direction_`/`yield_generator_`
+- `ego_planner_driver/src/ego_planner_driver_node.cpp`：collisionCheckTick 升级接候选；
+  right-of-way 判定；候选提交与 episode 锁存
+- `ego_planner_driver/launch/ego_planner_driver.launch` / `swarm_uav_executor/launch/uav_executor_ego.launch`：
+  `enable_yield_candidates=true`、`yield_clearance_factor=1.3`、`yield_lateral_max_m=2.0`、
+  `yield_slow_min_scale=0.3`
+- 测试：`test_yield_candidates.cpp`（新增）+ `test_ego_state_machine.cpp`（触发/选择/锁存用例）
+
+### 10.6 测试计划
+
+- 单测：
+  - SLOW 时间缩放（pts 不变、时长×1/scale、vel/acc 缩放）、悬停前机跳过；
+  - LEFT/RIGHT 法向偏移（冲突区偏移、窗口外不变、P/V/A 连续）、时间轴不变；
+  - 门槛：`min_clear ≥ 1.3m` 通过 / <1.3m 拒绝；
+  - cost：SLOW vs LEFT/RIGHT 选择（正交 SLOW 与 LEFT 比较）、同 cost 枚举顺序；
+  - right-of-way：低 ID STAND_ON 不生成、高 ID YIELD 生成；
+  - episode：已提交不重复、邻机更新重评估、方向锁存。
+- SITL：正交交叉（SLOW/LEFT 让路，双方 COMPLETED）、悬停前机通过（LEFT/RIGHT）、换位。
+
+### 10.7 实施顺序
+
+1. `YieldCandidateGenerator` + 单测；
+2. node 集成（collisionCheckTick 接候选 + right-of-way + episode）+ 单测；
+3. launch 参数；
+4. 全量回归 + SITL 正交/悬停/换位；
+5. 文档：计划状态、plans/README、测试记录。
+
+### 10.8 完成定义
+
+- 正交交叉双方 COMPLETED（SLOW/LEFT/RIGHT 让路生效），中心距 ≥1m；
+- 悬停前机通过场景 LEFT/RIGHT 绕行成功；
+- `collisionCheckTick` 为唯一候选触发源，SafetyPredictor 仅 EMERGENCY；
+- 全量自动测试 0 failure；SEQUENTIAL_START/固定 clearance/生成即发不回归。
+
