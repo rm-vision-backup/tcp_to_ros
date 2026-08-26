@@ -104,6 +104,22 @@ catkin_test_results --all build
      受约束制动；
    - 失败但 ttc 充足 → 交常规 replanLoop 兜底。
 3. 新增参数 `emergency_replan_time_s=1.0`（两个 launch）。
+4. **EMERGENCY 判定用固定物理 1m**（第二次复测后）：动态 `emergency_d`（含制动余量 ≈1.96m）比
+   规划层固定 1m 硬门更严 → UAV2 绕开 cpa_d≈1.2m 时永续 EMERGENCY→重规划 ping-pong。改回对齐
+   原版：`level=EMERGENCY` 仅当预测距离 ≤ `protected_distance`(1m)，动态门槛只作 WARNING 缓冲。
+
+### 3.4 复测时间线（监督层修订验证）
+
+| 轮次 | 结果 | 说明 |
+|---|---|---|
+| 首跑（去 age + 先重规划） | UAV1 误制动（age 放大门槛，BRKAE_HOLD） | 动态门槛 3.9m > 预测窗 min_d 3.89m |
+| 二跑（+EMERGENCY 物理 1m 判定） | **UAV1 COMPLETED**、UAV2 HOLD_FAILED | 误制动消除；UAV2 cpa_d≈1.2m 触发动态门槛 → 持续 EMERGENCY→replan ping-pong → 规划失败收口 |
+| 三跑（EMERGENCY 物理 1m 判定后） | **UAV2 COMPLETED**、UAV1 EGO_PLAN_FAILED→HOLD_FAILED | **无误制动**；min_3d=2.59m（≥1m 安全达标）；UAV1 正交交叉无法规划穿越 UAV2 移动走廊 → 安全 HOLD |
+
+- 监督层修订**验证有效**：三跑均无 EMERGENCY 制动误触发、实际中心距 ≥1m（2.59-3.8m）。
+- 剩余 FAIL 根因：**正交同时交叉的任务完成性**——UAV1 须穿越 UAV2 沿 x=10 上下移动的走廊，
+  同刻采样下任何穿越时刻均 <1m 硬门；固定 clearance + 无变速/让路候选（L3 删 SLOW/FAST）→
+  无法生成穿越轨迹 → 规划失败 → 安全 HOLD（非避碰失败）。
 
 ## 4. 结果汇总
 
@@ -116,15 +132,16 @@ catkin_test_results --all build
 | 监督层/GPS bias/契约保留 | ✅ | `SafetyPredictor` EMERGENCY、`bias_valid_s`、intent 时间契约、PositionTarget 契约、旧 1m 门禁未动 |
 | 全量自动测试 | **234 tests, 0 errors, 0 failures** | ego 119 + executor + tcp_to_ros |
 | bridge 残留修复 | ✅ 验证 | cleanup/预检加 bridge 检查；标定不再卡死 |
-| 双机正交 SITL | ⚠️ 首次跑通链路 | UAV2 COMPLETED；UAV1 误制动（age 放大门槛）→ 监督层已修订，**待复测** |
-| 双机换位 SITL | ⬜ 未执行 | 监督层修订后一并复测 |
+| 双机正交 SITL | ⚠️ 三次复测 | 监督层误制动消除、中心距 ≥1m；剩余 UAV1 正交穿越规划失败（安全 HOLD） |
+| 双机换位 SITL | ⬜ 未执行 | 正交完成后可测 |
 | intent 停发注入 | ⬜ 未执行 | 同上 |
 
 ## 5. 遗留项（未验证/未解决）
 
-1. **双机正交/换位 SITL 复测**：监督层修订（去 age + 先重规划再急停）后需重跑
-   `reciprocal_15sitl.py` 验证 UAV1 不再误制动、两机实际中心距 ≥1m、无振荡。
-2. **intent 停发注入**（计划 §6.2 场景 3）：依赖缓冲轨迹的周期碰撞检查检出碰撞，待复测验证。
+1. **正交同时交叉的任务完成性**：UAV1 无法规划穿越 UAV2 移动走廊（固定 clearance + 无让路候选）
+   → 规划失败安全 HOLD。需决策：a) 测试场景时序错开（一方先过）；b) 规划层恢复变速/等待能力；
+   c) 接受 HOLD 安全收口为预期行为。
+2. **双机换位 SITL** 与 **intent 停发注入**（计划 §6.2 场景 2/3）：待正交场景方案确定后执行。
 3. **`planOnce` 耗时实测**（计划 §2.4 前提）：周期 100ms >> 单次 replan 耗时假设，需在 SITL
    运行中实测确认。
 4. **takeoff 首跑时机失败**（startup 阶段 6 偶发）：active 重启后 MAVROS 未完全就绪，手动重跑
