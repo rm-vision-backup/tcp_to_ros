@@ -79,7 +79,7 @@ GCS_A 必须：
 | `implementation_plan_26082415.md` | min-snap 统一单段重构：轨迹平滑 + 双机不安全时本机 HOLD 暂停 | **已实施（2026-08-24，代码+单测；单机验证进行中）** |
 | `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **已撤回**（L3 精简：yield/角色/协商已删除，监督只留 EMERGENCY 制动；见 `implementation_plan_26082602.md` 决策依据） |
 | `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
-| `implementation_plan_26082603.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **待实施**（2026-08-26 新计划） |
+| `implementation_plan_26082621.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **待实施**（2026-08-26 新计划） |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -159,7 +159,7 @@ GCS_A 必须：
   时间戳修正为"固定 clearance 解耦"提供预测能力前提（见 implementation_plan_26082602）。
 - **SITL 复测复盘（2026-08-26，26082602 后七轮）**：双机正交多次复测暴露 ① 多路径 replan 提交竞争
   （replanLoop/collisionCheckTick/runSafetySupervisor 三处改轨迹）、② 候选让路破坏监督预测窗
-  （SLOW 时间延长 → INSUFFICIENT_DATA）、③ 候选方向/长度/速度约束缺陷。决策（`implementation_plan_26082603.md`）：
+  （SLOW 时间延长 → INSUFFICIENT_DATA）、③ 候选方向/长度/速度约束缺陷。决策（`implementation_plan_26082621.md`）：
   plan-exec 循环对齐原版（3m keypoints + 相邻目标推进）、单一 replan 入口（所有触发只置位）、
   EMERGENCY 制动走 replan 线程（方案 Y）、候选保留为 replan 失败分支、删 POSE_STALE。
 - **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
@@ -174,7 +174,7 @@ GCS_A 必须：
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
 | `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
 | `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（待实施） |
-| `plans/implementation_plan_26082603.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，待实施） |
+| `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，待实施） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
