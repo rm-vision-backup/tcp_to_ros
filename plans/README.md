@@ -174,7 +174,18 @@ GCS_A 必须：
   （verification `--max-speed`，加速档 1.2 + PX4 超调实测 1.49-1.54）后 **8/9 PASS**
   （仅 1 次 UAV1 规划失败 HOLD）；双方 COMPLETED 8/9（原始 3/5），min_3d 全程 ≥1.0m
   （1.15-1.62m），0.605m 距离门禁事件消除。
-- **未完成**：15 机 PX4 SITL 六批次端到端重跑；Phase 6 实机不上桨及上桨联调。
+- **prepare 15 机全 active + 软着陆修复（2026-08-27，26082700）**：15 机全 active prepare 批次 →
+  A02/A05 `EGO_PLAN_FAILED`（非距离门禁，互惠避碰约束下规划无解）→ 整组安全收口。修复：
+  ① replan 失败软着陆（保持当前轨迹执行，1s 定时/冲突/推进事件继续重试，连续失败 ≥
+  `plan_fail_timeout_s`(10s) 才 EGO_PLAN_FAILED）；② backend `_safe_hold` 分批 4 机 + 0.5s 重试
+  2 次；③ 候选 cost `dev/2.0→dev/5.0`；④ `hovering_velocity_mps` 0.1→0.2。全量 266 tests 0 failure
+  （26082700 记录为 265，系未含后续回归；当前实测 266）。
+- **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
+  与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
+  UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对
+  "走廊式/多机并发"冲突仍不足——改进方向见 `ego_planner_driver/README.md` 与
+  `.tmp/notes/UAV_swarm_waypoint_execution_collision_avoidance_research.md`。
+- **未完成**：15 机 PX4 SITL 六批次端到端重跑；双机交换/三机交叉/parepare 通过；Phase 6 实机不上桨及上桨联调。
 - **已知问题（测试流程）**：`gcs_a_backend.launch` 需 `catkin build tcp_to_ros` 后
   `roslaunch tcp_to_ros` 才能找到；跨 Master 建链初期多机 heartbeat 抖动易触发 fail-fast；
   UAV 逐机串行启动耗时较长，一机 roslaunch 偶发崩溃需逐机独立启动并补充轮。
@@ -185,11 +196,12 @@ GCS_A 必须：
 |---|---|
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
 | `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
-| `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（待实施） |
-| `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，待实施） |
-| `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
+| `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（已实施） |
+| `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，已实施） |
+| `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（历史） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
 | `test_records/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
+| `test_records/test_record_26082602.md` / `26082621.md` / `26082700.md` | 26082602 / 26082621 / prepare 15 机全 active 与软着陆修复记录 |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |

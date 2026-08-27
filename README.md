@@ -26,8 +26,9 @@ swarm_uav_executor     每架 UAVn 的任务执行器（PREPARE/START/ABORT/HOLD
         └─ setpoint_relay        MAVROS `/mavros/setpoint_raw/local` 唯一发布者（仲裁/失效 HOLD）→ PX4
 ```
 
-**坐标约定**：任务坐标按右/前/上解释；GCS_A 用 A01-A06 arm 前全球位置中位数冻结全局原点，
-参考航向 = A01-A06 的圆周平均 yaw（30° 门禁）；A01-A15 全部回读确认 `gp_origin` 后才开放任务。
+**坐标约定**：任务坐标按右/前/上解释；GCS_A 用 A01-A12（原点标定集）arm 前全球位置中位数冻结
+全局原点，参考航向 = A01-A12 的圆周平均 yaw（30° 门禁）；A01-A15 全部回读确认 `gp_origin`
+后才开放任务。
 
 ---
 
@@ -54,7 +55,10 @@ catkin_swarm6-2/
 
 ---
 
-## 3. 当前实现进度（2026-08-14）
+## 3. 当前实现进度（历史里程碑）
+
+> 详细实时状态以 `plans/README.md`「当前状态」为唯一权威；以下为本工作空间的早期里程碑摘要，
+> 具体演进见 `plans/README.md` 与 `test_records/`。
 
 ### 已实现并验证
 
@@ -198,7 +202,8 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 - **删除飞行安全租约（lease）**：原机制（renew 1Hz/TTL 5s/锁存）在仿真高负载与自组网电台（200-800ms 抖动）下必然失败；
   改为 `link_health`（MAVROS state 心跳 → DISCOVERED/HEALTHY/SUSPECT/LOST/RECOVERED）+ `safe_hold`。
   断链兜底：节点丢失 → backend LOST → 参与机全 HOLD → 手动接管。`UavSafetyLease.srv` 保留为 dead definition 不删。
-- **C++ 主状态 = HOLD**：空闲悬停用 `steady_target_` 冻结位姿，不再每秒刷新（避免漂移）；`POSE_STALE` 仅保护规划输入。
+- **C++ 主状态 = HOLD**：空闲悬停用 `steady_target_` 冻结位姿，不再每秒刷新（避免漂移）。
+  `POSE_STALE` 已删除（26082621），HOLD 锁存进入时位姿，不随 pose 漂移。
 - **分层轨迹**：非 follower 全部走 ego 带时轨迹；follower 用 PI 位置 + 固定槽位偏置；垂直段冻结 x/y/yaw。
 - **无 RC 起飞顺序**：切 Auto 模式（HOLD/LOITER）→ arm → OFFBOARD，避免 PX4 手动模式 RC 检查。
 
@@ -214,11 +219,12 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 - 曾修复 hold 捕获竞态（`192ad03`），但 prepare 重跑尚未进行；ego 轨迹在真实 PX4 下的执行
   稳定性（垂直→水平→垂直分层、长航点、机间互惠避碰）仍需多机验证。
 
-### 7.b 航点密化尚未实现
+### 7.b 航点密化（已完成）
 
-- TCP 上游下发的航点只有关键点，过于稀疏；ego_planner_driver 直接参数化会导致 B-spline
-  初始轨迹不贴合航线。需要在上层或驱动层**按最大间隔插值密化**（例如相邻航点间距 ≤2m；
-  思路已验证于 `verification/plot_ego_bspline_waypoints.py`），但尚未接入实现。
+- ✅ 已实现（26082621）：`EgoSwarmDriver` 按 `waypoint_densify_spacing=3.0` 均匀密化分层关键点后
+  发布 `/waypoints`；C++ 按相邻关键点推进（plan-exec 分支 A/B），3m 密化点只作推进/末点参考，
+  不进 B-spline（B-spline 初始点集由 C++ 侧 min-snap 单段按 0.4m 弧长等距采样生成）。
+  早期思路见 `verification/plot_ego_bspline_waypoints.py`。
 
 ### 7.c 实机部署方案待确定
 
@@ -242,7 +248,8 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ## 8. 已知问题与安全边界
 
-- `POSE_STALE` 只表示规划输入过期，不等于飞机停止；执行中位姿失联的最终兜底仍依赖 PX4 failsafe（`COM_OBL_ACT` 等）。
+- `POSE_STALE` 已删除（26082621）：pose 过期不再切换状态，HOLD 锁存进入时位姿；执行中位姿
+  失联的最终兜底仍依赖 PX4 failsafe（`COM_OBL_ACT` 等）。
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；实机前必须冻结 `COM_OF_LOSS_T`、`COM_OBL_ACT`、RC/datalink failsafe、急停职责、场地许可。
 - 批次任务仍在验证中（prepare 竞态已修，未重跑）；勿以本 README 状态代替实测记录。
 - 任何异常优先人工 HOLD/降落/急停；清理用精确 PID，勿用宽泛 `killall`/`pkill -f`。
@@ -251,8 +258,9 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 
 ## 9. 给下一个 coding agent 的快速指引
 
-1. 先读 `plans/README.md`（Phase 编号 + 设计规约）与 `test_records/test_record_26082400.md`（最新实测记录）。
-2. 当前主任务：**重跑 prepare 六批次**（竞态修复 `192ad03` 后），随后做断 bridge → link_health LOST → safe_hold 故障注入验证。
+1. 先读 `plans/README.md`（Phase 编号 + 设计规约 + 当前状态）与 `test_records/test_record_26082700.md`（最新实测记录）。
+2. 当前主任务：**双机交换 / 三机交叉 / prepare 批次通过**（双机正交 8/9 已过；走廊式/多机并发
+   避碰仍不足）。`ego_planner_driver/README.md` 为本包状态机 + replan 策略的单一权威。
 3. 改代码只动 `src/` 六个仓库；每包独立 commit（Conventional Commit，英文 header + 中文 body），**不 push**。
 4. 提交前 `catkin build` + 相关单测；测试记录写入 `test_records/test_record_2608xxxx.md`（文件名后缀 = 2 位年月日时）。
 5. 环境清理、端口、日志、无 RC 参数等注意点见本文档第 5 节。

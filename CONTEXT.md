@@ -59,10 +59,10 @@
 
 ## 整组启动屏障
 
-指 MOVE_TO 参与机在保持未 arm 状态下先完成任务登记与 arm 前检查，全部报告 PREPARED 后才由
-GCS_A 统一释放 START；任一成员拒绝或超时则发送 ABORT，未启动成员保持未 arm。该内部屏障不改变
-runtime 的 TCP 命令和状态协议，GCS_A 只在所有 START 已可靠登记后向上游报告 ACCEPTED；START
-不等待实际 arm、OFFBOARD 或起飞完成，这些动作属于批次执行期。
+指 MOVE_TO 参与机先完成任务登记与 arm 前检查（executor `prepare()` 要求已 connected、armed、
+OFFBOARD 且原点已确认），全部报告 PREPARED 后才由 GCS_A 统一释放 START；任一成员拒绝或超时则
+发送 ABORT。该内部屏障不改变 runtime 的 TCP 命令和状态协议，GCS_A 只在所有 START 已可靠登记后
+向上游报告 ACCEPTED；START 不等待实际起飞完成，这些动作属于批次执行期。
 
 ## 混合跨机通信
 
@@ -270,23 +270,26 @@ A01 至 A15；15 架全部完成一次性回读确认后，GCS_A 才进入标定
 
 ## 按需起飞
 
-指无人机保持上电且机载任务系统在线，但在首次参与 MOVE_TO 前仍保持未 arm；收到任务并通过整组
-起飞门禁后，参与机才进入 arm、OFFBOARD、起飞检查点和后续目标动作。已经处于可执行飞行状态的参与机跳过该过程。
+指无人机保持上电且机载任务系统在线，但在首次参与 MOVE_TO 前由外部起飞脚本（
+`offboard_takeoff_15.py`：HOLD → arm → OFFBOARD）完成起飞准备；`ego_planner_driver` 收到
+arm+OFFBOARD 沿后进入 `TAKEOFF` 状态自动软起飞（`takeoff_height_m=5.0`）。executor 的
+`prepare()` 只做 arm 前检查（要求已 armed + OFFBOARD + 原点确认），不再自行按需 arm。已处于
+可执行飞行状态的参与机跳过重新起飞。
 
 ## arm 权限
 
-指对本机飞控执行 arm 与切换 OFFBOARD 的唯一控制权。正式任务中该权限只属于本机 executor；
-GCS_A 只协调任务阶段，独立 takeoff 脚本不再直接控制飞控。
+指对本机飞控执行 arm 与切换 OFFBOARD 的动作。当前由外部起飞脚本（`offboard_takeoff_15.py`）
+执行，executor 不调用 arm/set_mode 服务；GCS_A 只协调任务阶段。多机任务中仅本机负责本机飞控。
 
 ## 起飞检查点
 
-指首次按需起飞时，以本机起飞位置为水平基准并相对上升 5 m 的中间安全目标。只有本机实测位置在
-检查点容差内连续稳定 2 s，才允许继续执行 MOVE_TO。该段只生成简单的垂直上升轨迹；完成后的
-MOVE_TO 分层上升、水平移动和目标点下降，以及 FOLLOW_ROUTE leader、FAULT_EXIT 的航迹均由 EGO 导航。
+指 `ego_planner_driver` 的 `TAKEOFF` 状态：收到 arm+OFFBOARD 后以本机起飞位置为水平基准、从
+当前 z 以 `takeoff_ascend_speed` 软上升到 `takeoff_height_m`(5 m) 的垂直段，完成后锁存 HOLD。
+不再有"检查点容差连续稳定 2 s"门禁（早期按需起飞设计，已随外部起飞流程移除）。
 
 ## 约束垂直轨迹
 
 指在阶段开始时冻结本机水平位置与航向，只沿 z 轴按照速度和加速度约束生成的升降轨迹。
-它用于起飞检查点、MOVE_TO 进入 15 m 层及下降到目标高度、FOLLOW_ROUTE leader 进入 12 m 层、
+它用于 TAKEOFF 软起飞、MOVE_TO 进入 15 m 层及下降到目标高度、FOLLOW_ROUTE leader 进入 12 m 层、
 FAULT_EXIT 进入 8 m 层，并以实测三维位置稳定到达作为完成条件。只有各任务层内的水平航段使用 EGO 导航。
 系统不在升降前预测垂直通道冲突；升降期间实时机间距离突破安全门槛时，当前整组批次任务立即失败并 HOLD。
