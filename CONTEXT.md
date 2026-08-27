@@ -59,10 +59,11 @@
 
 ## 整组启动屏障
 
-指 MOVE_TO 参与机先完成任务登记与 arm 前检查（executor `prepare()` 要求已 connected、armed、
-OFFBOARD 且原点已确认），全部报告 PREPARED 后才由 GCS_A 统一释放 START；任一成员拒绝或超时则
+指 MOVE_TO 参与机先完成任务登记与飞行前置状态检查（executor `prepare()` 只承担 armed、OFFBOARD、
+原点已确认三项飞行前置门禁），全部报告 PREPARED 后才由 GCS_A 统一释放 START；任一成员拒绝或超时则
 发送 ABORT。该内部屏障不改变 runtime 的 TCP 命令和状态协议，GCS_A 只在所有 START 已可靠登记后
-向上游报告 ACCEPTED；START 不等待实际起飞完成，这些动作属于批次执行期。
+向上游报告 ACCEPTED。START 只启动已登记任务，不负责 arm、切换 OFFBOARD 或触发起飞；5m TAKEOFF
+在 PREPARE 之前已由 planner 完成。
 
 ## 混合跨机通信
 
@@ -195,17 +196,24 @@ A 组 coverage-1 为 3 行×4 列（12 架）、coverage-2 为 3 行×3 列（9 
 
 ## 分层高度
 
-指按命令划分的飞行高度层：MOVE_TO 先垂直到 15 m，再水平移动，最后下降到目标点；
-FOLLOW_ROUTE leader 保持 12 m 编队层并使用 EGO 导航，followers 通过 PI 跟踪 leader 位置与编队槽位；
-FAULT_EXIT 先下降到 8 m 离队层，再使用 EGO 水平移动到目标点。首次按需起飞的 5 m 检查点位于
-MOVE_TO 的 15 m 分层动作之前。MOVE_TO 的三段动作按顺序分别执行并通过实测到达门禁，所有子阶段
-共享 runtime 下发的同一个批次执行时限，不因切换阶段而重置计时。
+指按命令划分的飞行高度层：MOVE_TO 从已完成 5m TAKEOFF 并处于 HOLD 的状态开始，先垂直到 15m，
+再水平移动，最后下降到目标点；FOLLOW_ROUTE leader 保持 12m 编队层并使用 EGO 导航，followers 通过
+PI 跟踪 leader 位置与编队槽位；FAULT_EXIT 先下降到 8m 离队层，再使用 EGO 水平移动到目标点。
+5m TAKEOFF 是任务前的 planner 状态，不属于 MOVE_TO 子阶段。MOVE_TO 的三段动作按顺序分别执行并
+通过实测到达门禁，所有任务子阶段共享 runtime 下发的同一个批次执行时限，不因切换阶段而重置计时。
 
 ## 机间最小距离
 
-指任意两架无人机机体中心之间必须维持的安全距离。当前机体物理半径为 0.4 m，规划安全距离
-固定为同高度水平中心距 1.0 m，因此总计保留 0.2 m 的机体边缘间隔；垂直中心距固定为 2.0 m，
-用于保留下洗安全空间。EGO 航迹和 PI 编队跟随都必须遵守该距离门禁。
+指任意两架无人机机体中心之间必须维持的统一球形安全距离，判定量均为三维欧氏中心距，不再使用
+“水平 <1.0m 且垂直 <2.0m”的圆柱规则。planner hard-clearance 对本机与邻机预测轨迹按同一绝对时刻
+采样，3D 中心距 `<1.0m` 即不通过；executor runtime gate 只使用 fresh odom，实测 3D 中心距
+`<1.0m` 即触发安全 HOLD。SafetyPredictor 使用更保守的边界，预测 3D 中心距 `<=1.0m` 即判定越界。
+
+## Safety 监督器
+
+指 `ego_planner_driver` 的预测安全监督能力。正式运行默认状态自 2026-08-27 起为 `active`；
+2026-08-25 曾采用 shadow 并禁用 active 的说明属于历史状态，仅用于解释当时测试与决策，已被
+2026-08-27 的 active 状态取代。
 
 ## 误差积分
 
@@ -225,9 +233,10 @@ GPS 地理原点（经纬高）。它在满足可配置的最小合格机数后�
 ## 原点标定集
 
 指冻结全局原点时，全球位置已达到质量门槛并被纳入中位数计算的无人机集合。它不等同于单个批次的任务参与集，
-当前固定为 A01 至 A12，且 12 架必须全部通过全球位置、姿态新鲜度与航向一致性门禁。
-标定过程不得通过自动剔除离群成员来构造一致子集；标定集内任一成员未通过，都会阻止原点与
-集群参考航向冻结以及整组 arm。A13 至 A15 不参与本次原点和航向的计算。
+当前标定计算集固定为 A01 至 A06，且 6 架必须全部通过全球位置、姿态新鲜度与航向一致性门禁。
+标定过程不得通过自动剔除离群成员来构造一致子集；标定计算集内任一成员未通过，都会阻止原点与
+集群参考航向冻结以及后续起飞流程。A07 至 A15 不参与本次原点和航向计算；但冻结结果下发 A01 至 A15，
+15 架均须回读确认。A01 至 A12 仍是 formation-1/prepare/coverage 成员集，不得因标定集合收缩而替换。
 
 ## 任务场地坐标系
 
@@ -243,13 +252,14 @@ GPS 地理原点（经纬高）。它在满足可配置的最小合格机数后�
 
 ## 标定就绪
 
-指操作员已通过 QGC 确认飞控状态正常和 RTK 收敛，随后 GCS_A 完成 A01 至 A12 的全局原点与
-集群参考航向冻结。RTK 收敛不由 GCS_A 等待；标定就绪之前不允许接收任务执行。
+指操作员已通过 QGC 确认飞控状态正常和 RTK 收敛，随后 GCS_A 完成 A01 至 A06 的全局原点与
+集群参考航向冻结，并完成 A01 至 A15 的原点回读确认。RTK 收敛不由 GCS_A 等待；标定就绪之前
+不允许进入外部起飞与任务执行流程。
 
 ## 原点应用确认
 
 指机载端从飞控回读到与 GCS_A 冻结值一致的实际全局原点事件。该确认是一次性的，不要求飞控
-持续发布原点，也不使用连续稳定时间窗口。A01 至 A12 用于计算原点和参考航向，冻结结果下发
+持续发布原点，也不使用连续稳定时间窗口。A01 至 A06 用于计算原点和参考航向，冻结结果下发
 A01 至 A15；15 架全部完成一次性回读确认后，GCS_A 才进入标定就绪，后续任务不再复验。
 
 确认逻辑仅使用 MAVROS 提供的 ROS 话题：先订阅每架无人机的 `gp_origin`，再向对应的
@@ -260,8 +270,8 @@ A01 至 A15；15 架全部完成一次性回读确认后，GCS_A 才进入标定
 
 ## 任务锚点
 
-指任务场地坐标系中与原点标定集全球位置中位点对应的固定坐标。它为任务坐标到共享 local ENU
-坐标的平移基准，当前固定为 `(10, 5, 0)`，不表示实机中任何指定无人机必然位于该点。
+指任务场地坐标系中与标定计算集全球位置中位点对应的固定坐标。它为任务坐标到共享 local ENU
+坐标的平移基准，当前固定为 `(0, 0, 0)`，与配置及源码一致，不表示实机中任何指定无人机必然位于该点。
 
 ## 偏置航点
 
@@ -270,22 +280,24 @@ A01 至 A15；15 架全部完成一次性回读确认后，GCS_A 才进入标定
 
 ## 按需起飞
 
-指无人机保持上电且机载任务系统在线，但在首次参与 MOVE_TO 前由外部起飞脚本（
-`offboard_takeoff_15.py`：HOLD → arm → OFFBOARD）完成起飞准备；`ego_planner_driver` 收到
-arm+OFFBOARD 沿后进入 `TAKEOFF` 状态自动软起飞（`takeoff_height_m=5.0`）。executor 的
-`prepare()` 只做 arm 前检查（要求已 armed + OFFBOARD + 原点确认），不再自行按需 arm。已处于
-可执行飞行状态的参与机跳过重新起飞。
+指完成标定后，由外部起飞脚本 `offboard_takeoff_15.py` 对本机执行 HOLD（拒绝时回退 AUTO.LOITER）
+→ arm → OFFBOARD；随后 `ego_planner_driver` 的 `TAKEOFF` 状态软起飞至
+`takeoff_height_m=5.0` 并锁存 HOLD。完成上述流程后，executor PREPARE 只检查 armed、OFFBOARD、
+原点确认，GCS START 只启动已经登记的任务。START 不触发按需起飞，5m 也不是
+MOVE_TO 子阶段。
 
 ## arm 权限
 
-指对本机飞控执行 arm 与切换 OFFBOARD 的动作。当前由外部起飞脚本（`offboard_takeoff_15.py`）
-执行，executor 不调用 arm/set_mode 服务；GCS_A 只协调任务阶段。多机任务中仅本机负责本机飞控。
+指对本机飞控执行 arm 与切换 OFFBOARD 的动作。当前只由外部起飞脚本（`offboard_takeoff_15.py`）
+执行：先 HOLD（失败时 AUTO.LOITER），再 arm，最后 OFFBOARD。executor 不调用 arm/set_mode 服务，
+PREPARE 只检查状态；GCS START 不拥有 arm/OFFBOARD 或起飞权限。多机任务中脚本也仅操作对应本机飞控。
 
 ## 起飞检查点
 
-指 `ego_planner_driver` 的 `TAKEOFF` 状态：收到 arm+OFFBOARD 后以本机起飞位置为水平基准、从
-当前 z 以 `takeoff_ascend_speed` 软上升到 `takeoff_height_m`(5 m) 的垂直段，完成后锁存 HOLD。
-不再有"检查点容差连续稳定 2 s"门禁（早期按需起飞设计，已随外部起飞流程移除）。
+指 `ego_planner_driver` 的 `TAKEOFF` 状态：外部脚本完成 arm→OFFBOARD 后，以本机起飞位置为
+水平基准、从当前 z 以 `takeoff_ascend_speed` 软上升到 `takeoff_height_m`（5m），完成后锁存 HOLD。
+它发生在 executor PREPARE 和 GCS START 之前，不属于 MOVE_TO 的任何子阶段。
+不再有“检查点容差连续稳定 2s”门禁（早期按需起飞设计，已随外部起飞流程移除）。
 
 ## 约束垂直轨迹
 

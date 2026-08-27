@@ -58,17 +58,24 @@ GCS_A 必须：
 
 ### 分层高度（动作层语义，不属于分发层）
 
-- `MOVE_TO`：首次按需起飞先完成相对 5m 检查点，再垂直到 15m、EGO 水平、垂直到目标 z；
+- `MOVE_TO`：任务开始前 planner 已完成 5m TAKEOFF 并进入 HOLD；任务本身垂直到 15m、EGO 水平、垂直到目标 z；
 - `FOLLOW_ROUTE`：leader 在 12m 执行 EGO，followers 在 12m 使用 PI+固定编队偏置；
 - `FAULT_EXIT`：先垂直到 8m，再使用 EGO 水平离队。
 
 ### 安全基线（不可弃用）
 
-- arm/OFFBOARD 软件所有权只属于本机 executor；仅未 arm 的 `MOVE_TO` 在整批 PREPARE/START 门禁后按需起飞。
-- GCS_A 在任务前冻结 A01-A12 全球位置中位数与集群参考航向，A01-A15 原点回读全部确认前拒绝任务。
-- 严格垂直段冻结 x/y/yaw；运行时水平中心距小于 1.0m 且垂直中心距小于 2.0m 时整批 HOLD。
+- arm/OFFBOARD 软件所有权属于外部本机脚本 `offboard_takeoff_15.py`，不属于 executor 或 GCS START。
+- 起飞顺序固定为：完成标定 → 脚本 HOLD（拒绝时回退 AUTO.LOITER）→ arm → OFFBOARD → planner TAKEOFF
+  软起飞至 5m → HOLD → executor PREPARE 只检查 armed/OFFBOARD/origin → GCS START 启动已登记任务。
+  START 不触发按需起飞，5m TAKEOFF 不属于 MOVE_TO 子阶段。
+- GCS_A 在任务前用 A01-A06 全球位置中位数与圆周平均航向冻结标定结果，A01-A15 原点回读全部确认前拒绝后续流程；
+  A01-A12 仍是 formation-1/prepare/coverage 成员集，不得替换为 A01-A06。
+- `mission_anchor` 固定为 `(0,0,0)`，与当前配置及源码坐标变换一致。
+- 统一球形距离门禁：planner hard-clearance 对预测轨迹同刻 3D 中心距 `<1.0m` 判失败；executor runtime gate
+  对 fresh odom 的 3D 中心距 `<1.0m` 触发 HOLD；SafetyPredictor 采用更保守的 `<=1.0m` 边界。
+- Safety 正式默认 `active`（2026-08-27）；2026-08-25 的 shadow/active 禁用结论保留为历史，但已被该状态取代。
 - 软件 HOLD 不替代 PX4 datalink/offboard/RC failsafe；现场门禁完成前不得上桨。
-- 无 RC 的 PX4 SITL 需设 `COM_RCL_EXCEPT=4` + `NAV_RCL_ACT=0`，并**先切 OFFBOARD 再 arm**。
+- 无 RC 的 PX4 SITL 需设 `COM_RCL_EXCEPT=4` + `NAV_RCL_ACT=0`，并按 HOLD/AUTO.LOITER → arm → OFFBOARD 执行。
 
 ## 实施计划（现存）
 
@@ -80,17 +87,22 @@ GCS_A 必须：
 | `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **已撤回**（L3 精简：yield/角色/协商已删除，监督只留 EMERGENCY 制动；见 `implementation_plan_26082602.md` 决策依据） |
 | `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
 | `implementation_plan_26082621.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **已实施（2026-08-26，代码+单测 257 tests 0 failure；SITL 双机验收进行中）** |
+| `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **待实施（2026-08-27 完成计划审查；尚未修改源码/launch/测试）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
 
 ## 当前状态（实时）
 
-- **已落地**：A01-A12 全员原点/航向门禁、A01-A15 原点回读确认、任务右-前-上变换、固定编队
-  1/2 精确集合、内部 PREPARE/START/ABORT、executor 按需起飞、15/12/8m 分层动作、followers PI、
-  EGO 硬 clearance 与垂直/PI 实时距离门禁、EGO 巡航运行时距离门禁（水平<1.0m 且垂直<2.0m → 本机 HOLD）。
-- **坐标冻结**：A01-A12 连续采样 2s 后逐机求全球位置中位数和圆周平均航向，任一缺失、已 arm 或
+- **已落地**：A01-A06 全员原点/航向计算门禁、A01-A15 原点回读确认、`mission_anchor=(0,0,0)`
+  任务右-前-上变换、固定编队 1/2 精确集合、内部 PREPARE/START/ABORT、外部脚本 arm/OFFBOARD、
+  planner TAKEOFF 5m 后 HOLD、15/12/8m 任务分层动作、followers PI、planner hard-clearance 与 executor
+  runtime gate（统一 3D 中心距 1m 球形规范）。A01-A12 保持 formation-1/prepare/coverage 成员集。
+- **坐标冻结**：A01-A06 连续采样 2s 后逐机求全球位置中位数和圆周平均航向，任一缺失、已 arm 或
   航向偏差超过 30° 均拒绝；冻结值在 GCS_A 进程内不变。15/15 原点回读达到水平/高度 0.1m 才就绪。
+- **起飞/任务时序**：标定 → 外部脚本 HOLD（或 AUTO.LOITER）→ arm → OFFBOARD → planner TAKEOFF 软起飞
+  5m → HOLD → executor PREPARE 只检查 armed/OFFBOARD/origin → GCS START。executor 不拥有 arm，
+  START 不触发起飞，5m 不属于 MOVE_TO 子阶段。
 - **链路健康（2026-08-12 晚修复）**：`link_health` + `safe_hold` 承担节点丢失 → 停止 → 全悬停 → 手动接管；
   `is_healthy_or_undiscovered` 不阻任务，heartbeat 阈值 suspect 10s / lost 15s，`ego_swarm.state_timeout_s=200`。
 - **lease 已删除（2026-08-14）**：lease 时延敏感（renew 0.9s）且实机自组网必失败，按
@@ -104,7 +116,8 @@ GCS_A 必须：
 - **min-snap 统一单段重构（2026-08-24 已实施）**：上层 keypoints 最大 2m 密化（仅窗口推进/末点参考，
   不进 B-spline）；C++ `planOnce` 用 `one_segment_traj_gen` 单段（起点=旧轨迹 P/V/A、end_vel=切线巡航、
   最终段静止、梯形 T）→ 0.4m 弧长采样 point_set → `parameterizeToBspline` → L-BFGS（jerk+feasibility）；
-  默认停用 `enable_rebound`/`enable_time_reparam`；执行层 EGO 巡航距离门禁扩展 `_distance_safe`；
+  默认停用 `enable_rebound`/`enable_time_reparam`；执行层 EGO 巡航 `_distance_safe` runtime gate 使用
+  fresh odom 的 3D 中心距 `<1.0m` 球形判定；
   `replan_period_s=1.0`、PositionTarget 契约不回归。多段 `minSnapTraj` 为备用方案（仅记录不实施）。
 - **验证进展（min-snap 基线）**：当时全量 `catkin_test_results --all build` 166 tests 0 failure。多次 15 机无头 prepare
   因机间接近（如 UAV3-UAV5 0.85m）触发距离门禁 HOLD 而整组 FAILURE，符合"双机不安全即 HOLD"预期；
@@ -118,26 +131,28 @@ GCS_A 必须：
   多轮互惠收敛未通过。`enable_rebound` 因此继续默认 false，生产兜底仍是执行层距离门禁 HOLD，
   禁止仅恢复开关作为主动避碰完成证据。最终全量结果为 186 tests、0 failure（含生产 EGO launch
   展开后的 `enable_rebound=false` runtime rostest，以及 TCP listener 早绑定/端口策略回归）。
-- **主动避碰增强阶段 A（2026-08-25 已完成）**：新增纯 C++ `SafetyPredictor`、数字 ID role、
-  episode 迟滞和有界异步 `SafetyLogger`；生产 launch 以 25Hz shadow 计算同轴 CPA/TTC、数据年龄和
+- **主动避碰增强阶段 A（2026-08-25 已完成，历史状态）**：新增纯 C++ `SafetyPredictor`、数字 ID role、
+  episode 迟滞和有界异步 `SafetyLogger`；当时生产 launch 以 25Hz shadow 计算同轴 CPA/TTC、数据年龄和
   两级动态门槛，不改状态/轨迹/intent/setpoint。`ego_planner_driver` 96 tests 0 failure。后续依次实现
   受约束紧急制动、最多 1s tentative intent 协商窗口、
   数字 ID right-of-way 和左/右/减速/加速四候选。缺失邻机默认不阻启动，旧 1m 门禁仅在全部延迟/
   惯性 A/B 验收通过后才可独立删除。
 - **主动避碰增强阶段 B（2026-08-25 自动测试完成）**：新增从执行轨迹同刻 P/V/A 连续衔接的
   受约束停车轨迹，active emergency 可抢占 nominal；safety generation 阻止晚到规划覆盖制动；停车后
-  锁存真实终点 `BRAKE_HOLD`。生产仍默认 shadow，SITL/延迟闭环前不声明飞行验收。
+  锁存真实终点 `BRAKE_HOLD`。当时生产仍默认 shadow，SITL/延迟闭环前不声明飞行验收；该默认状态已于
+  2026-08-27 被正式 active 状态取代。
 - **主动避碰增强阶段 C/D（2026-08-25 自动测试完成）**：intent 协议 2.0 增加
   tentative/active/braking phase（ROS MD5 变更，须同批重建全消费者）；≤1s 协商窗口、缺失邻机
   不阻塞；数字 ID right-of-way + LEFT/RIGHT/SLOW/FAST 四候选与确定性评分。全工作区 229 tests
-  0 failure。生产 launch 默认 shadow。
-- **⚠️ 当前可信基线（2026-08-25 审查后冻结）**：
-  - ✅ **可用**：通信链路（bridge/Service/TCP 协议未动）、min-snap 轨迹执行/分层/起飞、
+  0 failure。当时生产 launch 默认 shadow；该默认状态已于 2026-08-27 被正式 active 状态取代。
+- **⚠️ 2026-08-25 审查后冻结的历史基线（已被 2026-08-27 active 状态取代）**：
+  以下内容保留用于解释当时决策，不再代表当前正式默认状态：
+  - ✅ **当时可用**：通信链路（bridge/Service/TCP 协议未动）、min-snap 轨迹执行/分层/起飞、
     shadow 预测（只写日志不改行为）。
-  - 🚫 **冻结**：`safety_supervisor_mode=active`（制动/让路）存在已确认逻辑缺陷
-    （见 `implementation_plan_26082500.md` §7.5 缺陷清单 1–7），**SITL 禁止用 active 跑**，
-    生产保持 shadow。缺陷 1（`EgoSwarmDriver.hold()` 忽略 deadline 阻塞 200s）已修复，
-    缺陷 2–7 按清单顺序待修。
+  - 🚫 **当时冻结**：`safety_supervisor_mode=active`（制动/让路）存在已确认逻辑缺陷
+    （见 `implementation_plan_26082500.md` §7.5 缺陷清单 1–7），当时 **SITL 禁止用 active 跑**、
+    生产保持 shadow。此禁用结论已由 2026-08-27 正式默认 active 状态取代；缺陷 1
+    （`EgoSwarmDriver.hold()` 忽略 deadline 阻塞 200s）已修复，缺陷 2–7 为当时待修清单。
   - ⚠️ **假配置**：`neighbor_stale_policy`/`neighbor_intent_stale_s`/`neighbor_missing_policy`
     仅存在于 launch，生产 C++ 未接入决策分支，勿据此判断系统行为。
   - 阶段 C tentative 协商屏障只在测试路径 `replanOnce()` 生效，**生产 `replanLoop()` 未接线**
@@ -174,12 +189,24 @@ GCS_A 必须：
   （verification `--max-speed`，加速档 1.2 + PX4 超调实测 1.49-1.54）后 **8/9 PASS**
   （仅 1 次 UAV1 规划失败 HOLD）；双方 COMPLETED 8/9（原始 3/5），min_3d 全程 ≥1.0m
   （1.15-1.62m），0.605m 距离门禁事件消除。
-- **prepare 15 机全 active + 软着陆修复（2026-08-27，26082700）**：15 机全 active prepare 批次 →
+- **Safety 正式状态（2026-08-27）**：正式默认 `safety_supervisor_mode=active`。planner hard-clearance
+  以预测轨迹同一时刻的 3D 中心距 `<1.0m` 为硬门，executor runtime gate 以 fresh odom 的 3D 中心距
+  `<1.0m` 为门禁，均为球形规范；SafetyPredictor 使用 `<=1.0m`，在恰好 1m 的边界上更保守。
+  2026-08-25 的生产 shadow 与 active 禁用说明仅保留为历史，已被本状态取代。
+- **prepare 15 机全 active + 软着陆修复（2026-08-27，26082700）**：`safety_supervisor_mode=active`
+  下 15 机 prepare 批次 →
   A02/A05 `EGO_PLAN_FAILED`（非距离门禁，互惠避碰约束下规划无解）→ 整组安全收口。修复：
   ① replan 失败软着陆（保持当前轨迹执行，1s 定时/冲突/推进事件继续重试，连续失败 ≥
   `plan_fail_timeout_s`(10s) 才 EGO_PLAN_FAILED）；② backend `_safe_hold` 分批 4 机 + 0.5s 重试
   2 次；③ 候选 cost `dev/2.0→dev/5.0`；④ `hovering_velocity_mps` 0.1→0.2。全量 266 tests 0 failure
   （26082700 记录为 265，系未含后续回归；当前实测 266）。
+- **轨迹末端 OOM（2026-08-27，待实施修复）**：15-UAV active prepare 在短末段重规划时出现多个
+  `ego_planner_driver` 单进程 RSS 达约 5.9–12.0 GiB、`bad_alloc/-6/-9/OOM kill`，继而产生 3–9s
+  setpoint 空洞、QGC 卡顿和批量 OFFBOARD 丢失。根因确认是移植版五次多项式按物理时长 `T` 构造，
+  却固定在 `[0,1]` 外推采样，随后按 0.4m 无界生成 point set，并由 dense B-spline QR 进一步放大。
+  `implementation_plan_26082722.md` 已完成一致性审查，计划采用真实 `[0,T]` 有界采样、分配前资源门禁、
+  bounded single-QR、四类内部 `PlanResult` 和受限内存回归；当前只完成计划与索引，尚未实施源码、launch
+  或测试修改。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对
@@ -198,6 +225,7 @@ GCS_A 必须：
 | `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
 | `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（已实施） |
 | `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，已实施） |
+| `plans/implementation_plan_26082722.md` | 轨迹末端 OOM 最终修复：真实 `[0,T]` 有界采样、资源边界、single-QR 与回归验收（待实施） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（历史） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
