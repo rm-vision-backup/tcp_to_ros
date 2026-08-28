@@ -87,7 +87,7 @@ GCS_A 必须：
 | `implementation_plan_26082500.md` | 预测式制动门禁 + tentative intent 屏障 + ID right-of-way + 四候选让路 | **已撤回**（L3 精简：yield/角色/协商已删除，监督只留 EMERGENCY 制动；见 `implementation_plan_26082602.md` 决策依据） |
 | `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
 | `implementation_plan_26082621.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **已实施（2026-08-26，代码+单测 257 tests 0 failure；SITL 双机验收进行中）** |
-| `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **待实施（2026-08-27 完成计划审查；尚未修改源码/launch/测试）** |
+| `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **已实施（2026-08-28，代码+单测+PSI；全量 295 tests 0 failure；15-UAV prepare 验收进行中）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -200,13 +200,16 @@ GCS_A 必须：
   `plan_fail_timeout_s`(10s) 才 EGO_PLAN_FAILED）；② backend `_safe_hold` 分批 4 机 + 0.5s 重试
   2 次；③ 候选 cost `dev/2.0→dev/5.0`；④ `hovering_velocity_mps` 0.1→0.2。全量 266 tests 0 failure
   （26082700 记录为 265，系未含后续回归；当前实测 266）。
-- **轨迹末端 OOM（2026-08-27，待实施修复）**：15-UAV active prepare 在短末段重规划时出现多个
-  `ego_planner_driver` 单进程 RSS 达约 5.9–12.0 GiB、`bad_alloc/-6/-9/OOM kill`，继而产生 3–9s
-  setpoint 空洞、QGC 卡顿和批量 OFFBOARD 丢失。根因确认是移植版五次多项式按物理时长 `T` 构造，
-  却固定在 `[0,1]` 外推采样，随后按 0.4m 无界生成 point set，并由 dense B-spline QR 进一步放大。
-  `implementation_plan_26082722.md` 已完成一致性审查，计划采用真实 `[0,T]` 有界采样、分配前资源门禁、
-  bounded single-QR、四类内部 `PlanResult` 和受限内存回归；当前只完成计划与索引，尚未实施源码、launch
-  或测试修改。
+- **轨迹末端 OOM 修复（2026-08-28，已实施 26082722）**：根因固定 `[0,1]` 外推采样 + 0.4m 无界
+  point set + 三次 dense QR。修复：`samplePolynomialByArcLength` 只按真实物理时长 `[0,T]` 有界细采样
+  （`N=ceil(T/0.02)+1` 上限 `max_arc_samples=4096`），弧长重采样点数在分配前 checked arithmetic 并限制
+  `max_parameterization_points=256`；`parameterizeToBspline` 改为 bounded single-QR（一次分解三列 RHS、
+  rank/residual/finite 校验、失败清空输出）；core 返回四类 `PlanResult`（SUCCESS/DEGENERATE_SEGMENT/
+  RETRYABLE_FAILURE/RESOURCE_LIMIT）；node 对 DEGENERATE 等待真实 odometry、RETRYABLE 软着陆、RESOURCE
+  立即 `EGO_PLAN_FAILED→HOLD`；yield 候选传播资源失败；replan 线程最外层 `bad_alloc` containment；
+  intent/轨迹/采样全部硬上限。timed trajectory nominal step 保持 0.1s、candidate/relay 30Hz、
+  candidate timeout 0.2s 未动。测试：短末段受限回归（512MiB AS、RSS 平台）、全量 295 tests 0 failure、
+  500/2000 次压力均通过 RSS 门禁；15-UAV active prepare 验收待跑。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对
@@ -225,11 +228,12 @@ GCS_A 必须：
 | `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
 | `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（已实施） |
 | `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，已实施） |
-| `plans/implementation_plan_26082722.md` | 轨迹末端 OOM 最终修复：真实 `[0,T]` 有界采样、资源边界、single-QR 与回归验收（待实施） |
+| `plans/implementation_plan_26082722.md` | 轨迹末端 OOM 最终修复：真实 `[0,T]` 有界采样、资源边界、single-QR 与回归验收（已实施 2026-08-28） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（历史） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
 | `test_records/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
 | `test_records/test_record_26082602.md` / `26082621.md` / `26082700.md` | 26082602 / 26082621 / prepare 15 机全 active 与软着陆修复记录 |
+| `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁（本记录） |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |
