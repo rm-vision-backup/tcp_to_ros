@@ -200,21 +200,26 @@ GCS_A 必须：
   `plan_fail_timeout_s`(10s) 才 EGO_PLAN_FAILED）；② backend `_safe_hold` 分批 4 机 + 0.5s 重试
   2 次；③ 候选 cost `dev/2.0→dev/5.0`；④ `hovering_velocity_mps` 0.1→0.2。全量 266 tests 0 failure
   （26082700 记录为 265，系未含后续回归；当前实测 266）。
-- **轨迹末端 OOM 修复（2026-08-28，已实施 26082722）**：根因固定 `[0,1]` 外推采样 + 0.4m 无界
-  point set + 三次 dense QR。修复：`samplePolynomialByArcLength` 只按真实物理时长 `[0,T]` 有界细采样
-  （`N=ceil(T/0.02)+1` 上限 `max_arc_samples=4096`），弧长重采样点数在分配前 checked arithmetic 并限制
-  `max_parameterization_points=256`；`parameterizeToBspline` 改为 bounded single-QR（一次分解三列 RHS、
-  rank/residual/finite 校验、失败清空输出）；core 返回四类 `PlanResult`（SUCCESS/DEGENERATE_SEGMENT/
-  RETRYABLE_FAILURE/RESOURCE_LIMIT）；node 对 DEGENERATE 等待真实 odometry、RETRYABLE 软着陆、RESOURCE
-  立即 `EGO_PLAN_FAILED→HOLD`；yield 候选传播资源失败；replan 线程最外层 `bad_alloc` containment；
-  intent/轨迹/采样全部硬上限。timed trajectory nominal step 保持 0.1s、candidate/relay 30Hz、
-  candidate timeout 0.2s 未动。测试：短末段受限回归（512MiB AS、RSS 平台）、全量 295 tests 0 failure、
-  500/2000 次压力均通过 RSS 门禁。**15-UAV active prepare 验收（2026-08-28）**：全 clean → 15 模型 →
-  15 套 onboard(active) 一次性启动 → bridge/backend/标定 → takeoff 15/15（z≈5m）→ prepare 批次 =
-  **FAILURE(A02/HOLD)**，但本 OOM 修复判据全部通过：15 个 planner 全程存活、RSS 稳定 11-12 MB
-  （修复前 5.9-12.0 GiB）、host 峰值可用 20 GiB、OFFBOARD 15/15 保持、relay 实测 30.000 Hz /
-  max 间隔 0.034 s < 0.2 s、无 OOM/bad_alloc/-6/-9。A02/HOLD 属既有 15 机密集避碰规划无解类别
-  （见「换位/三机/编队未通过」），与 OOM 无关；整轮按 §8 FAIL 清理（0 残留）。
+- **轨迹末端 OOM 修复（2026-08-28，已实施 26082722 + 260828 复审修复）**：根因固定 `[0,1]` 外推采样
+  + 0.4m 无界 point set + 三次 dense QR。修复：`samplePolynomialByArcLength` 只按真实物理时长
+  `[0,T]` 有界细采样（`N=ceil(T/0.02)+1` 上限 `max_arc_samples=4096`），弧长重采样点数在分配前
+  checked arithmetic 并限制 `max_parameterization_points=256`；`parameterizeToBspline` 改为 bounded
+  single-QR（一次分解三列 RHS、rank/residual/finite 校验、失败清空输出）；core 返回四类 `PlanResult`
+  （SUCCESS/DEGENERATE_SEGMENT/RETRYABLE_FAILURE/RESOURCE_LIMIT）；node 对 DEGENERATE 等待真实
+  odometry、RETRYABLE 软着陆、RESOURCE 立即 `EGO_PLAN_FAILED→HOLD`；yield 候选传播资源失败；replan
+  线程最外层 `bad_alloc` containment；intent/轨迹/采样全部硬上限。timed trajectory nominal step 保持
+  0.1s、candidate/relay 30Hz、candidate timeout 0.2s 未动（冻结契约无回归）。**260828 复审修复**：
+  ① 退化段状态机（snapshot 前 fresh-odom 推进/最终到达；无 current_ 真实到达 → COMPLETED；DEGENERATE
+  已失败计时 → 软着陆 10s 收口；退化等待禁 HOLD 捕获锁存）；② 生产开关全关下采样后欧氏峰值
+  >2.5×max_vel/max_acc → RETRYABLE_FAILURE（不发布 intent）；③ 资源分类方式 B（独立紧 cap 测试只接受
+  RESOURCE_LIMIT + 空输出、普通矩阵 resource==0、node 层零 retry/零 yield/无部分 intent）；④ 两个
+  setrlimit 返回检查。测试（260828 重跑，完整 suite filter）：受限短末段 7 tests、ego_planner_driver
+  **172 tests 0 failure**、全工作区 **303 tests 0 errors 0 failures**、500/2000 次压力（完整
+  `ShortFinalSegment.*` 前缀）均过 RSS 门禁。**计划级 15-UAV active prepare 验收状态（260828 修正，
+  §4.1）**：实现已提交；memory-specific observations PASS（上一轮 15 机：planner RSS 11-12 MB、
+  OFFBOARD 15/15、relay 30.000 Hz / max 间隔 0.034 s、无 OOM/−6/−9）；prepare 批次上一轮返回
+  **FAILURE(A02/HOLD)** ⇒ 按冻结计划 §15 整轮判 **计划级 acceptance FAIL**，需修复当前任务缺陷后重跑
+  整轮 15-UAV acceptance（A02 根因是否属 OOM 范围不改变判 FAIL 事实）。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对
