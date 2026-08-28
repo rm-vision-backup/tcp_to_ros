@@ -223,6 +223,15 @@ GCS_A 必须：
   看门狗转 HOLD → executor COMMAND_HELD；前两轮 FAILURE(A02/A05 EGO_PLAN_FAILED)）⇒ 按冻结计划 §15
   整轮判 **计划级 acceptance FAIL**，需修复当前任务缺陷后重跑整轮 15-UAV acceptance（A03 根因是否
   属 OOM 范围不改变判 FAIL 事实）。
+- **到达阈值放宽 0.2m→0.5m（2026-08-28 用户决策）**：`arrival_reach_thresh_m` 由 0.2m 放宽为
+  **0.5m**（`checkArrival` 分支 B：距最终关键点 <0.5m 且稳定 `arrival_stable_s`=1.0s → COMPLETED）。
+  依据：第 3 轮 prepare 实测 UAV3 终点偏差 0.29m 停在 0.2m 判据外 → 看门狗 HOLD → COMMAND_HELD；
+  0.5m 覆盖该偏差。同步修改 `ego_planner_driver`（node.h/.cpp 默认与注释、`ego_planner_driver.launch`、
+  README、`test_ego_state_machine.cpp` 注释 + `DegenerateWhileFailingClosesAfterTimeout` pose
+  4.7→4.3 保持"距目标 0.7m>0.5m 不到达"语义）与 `swarm_uav_executor`（`uav_executor_ego.launch` 透传、
+  `test_ego_launch_config.py` 断言）。自动测试全部通过：相关包 -j1 -p1（ego 172 + executor 94）、
+  受限短末段 7 tests、全工作区 **303 tests 0 errors 0 failures**。冻结契约（30Hz/0.2s timeout、
+  PositionTarget、relay、Safety、1m 距离门禁）未回归。计划级 15-UAV acceptance 待重跑整轮确认。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对

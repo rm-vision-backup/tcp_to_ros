@@ -107,6 +107,14 @@
   `completion_policy=ALL` 判整组 `FAILURE(A03)` 并对活动机安全 HOLD 收口。无 `EGO_PLAN_FAILED`、
   无 `MIN_DISTANCE_BREACH`、无 emergency/制动记录；属**任务级终点到达精度缺陷**
   （与前两轮 A02/A05 `EGO_PLAN_FAILED` 同类避碰/终点约束问题，非 OOM 范围）。
+- **到达阈值调整（260828 用户决策，本记录后补）**：`arrival_reach_thresh_m` 由 0.2m 放宽为
+  **0.5m**（0.5m + `arrival_stable_s`=1.0s 锁存 → COMPLETED），覆盖第 3 轮实测 0.29m 终点偏差。
+  修改文件：`ego_planner_driver`（node.h 默认值、node.cpp param 默认与注释、两个 launch、README、
+  `test_ego_state_machine.cpp` 注释及 `DegenerateWhileFailingClosesAfterTimeout` pose 4.7→4.3 以
+  保持"距目标 0.7m > 0.5m 不到达"语义）、`swarm_uav_executor`（launch 透传、`test_ego_launch_config.py`
+  断言 0.5）。自动测试：相关包 `-j1 -p1` ego 172 + executor 94 全过、受限短末段 7 tests PASS、
+  全工作区 **303 tests 0 errors 0 failures**。0.29m 偏差在新阈值内 ⇒ A03 类终点应 COMPLETED，
+  计划级验收需重跑整轮确认。
 - 本轮内存/资源/频率判据——**全部 PASS**：
 
 | 判据 | 实测 |
