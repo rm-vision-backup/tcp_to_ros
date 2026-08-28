@@ -209,7 +209,12 @@ GCS_A 必须：
   立即 `EGO_PLAN_FAILED→HOLD`；yield 候选传播资源失败；replan 线程最外层 `bad_alloc` containment；
   intent/轨迹/采样全部硬上限。timed trajectory nominal step 保持 0.1s、candidate/relay 30Hz、
   candidate timeout 0.2s 未动。测试：短末段受限回归（512MiB AS、RSS 平台）、全量 295 tests 0 failure、
-  500/2000 次压力均通过 RSS 门禁；15-UAV active prepare 验收待跑。
+  500/2000 次压力均通过 RSS 门禁。**15-UAV active prepare 验收（2026-08-28）**：全 clean → 15 模型 →
+  15 套 onboard(active) 一次性启动 → bridge/backend/标定 → takeoff 15/15（z≈5m）→ prepare 批次 =
+  **FAILURE(A02/HOLD)**，但本 OOM 修复判据全部通过：15 个 planner 全程存活、RSS 稳定 11-12 MB
+  （修复前 5.9-12.0 GiB）、host 峰值可用 20 GiB、OFFBOARD 15/15 保持、relay 实测 30.000 Hz /
+  max 间隔 0.034 s < 0.2 s、无 OOM/bad_alloc/-6/-9。A02/HOLD 属既有 15 机密集避碰规划无解类别
+  （见「换位/三机/编队未通过」），与 OOM 无关；整轮按 §8 FAIL 清理（0 残留）。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对

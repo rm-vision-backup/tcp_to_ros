@@ -58,9 +58,36 @@
 | 500 次压力 | `timeout 180 prlimit --as=... --cpu=120 ... -gtest_filter=ShortFinalSegment.StressLoopMemoryPlateau` | `[  PASSED  ] 1 test`（500×5 次 planOnce） |
 | 2000 次长压力 | `SHORT_FINAL_STRESS_LOOPS=2000 timeout 300 prlimit --as=... --cpu=240 ... -gtest_filter='StressLoopMemoryPlateau:FunctionalMatrixBoundedAndClassified'` | `[  PASSED  ] 2 tests`（2000×5 次 planOnce，RSS 平台稳定） |
 
-## 3. 结论与遗留
+## 3. 15-UAV active prepare 端到端验收（2026-08-28，受 watchdog 保护）
 
-- 根因（`[0,1]` 外推采样 + 无界 point set + 三次 QR）已修复；内存门禁/全量自动测试/500/2000 次压力全部通过。
+环境：startup_ego_sitl.sh 等价流程（cleanup → 15 模型 headless PX4 → 15 套 onboard active 一次性启动 → bridge/backend → 标定+origin → 外部 arm/OFFBOARD → planner TAKEOFF 5m → HOLD → TCP 39001 → prepare 批次）。
+
+| 阶段 | 结果 |
+|---|---|
+| 全环境 clean | ✅ 0 残留，11300/11310/11311-11325/11345/39001 全 free |
+| sim 15 模型 | ✅ 15 px4 + 15 spawn |
+| onboard 15 机（active） | ✅ 15/15 ready |
+| bridge/backend/标定 | ✅ /UAV1-15 服务代理 OK、calibration_ready=True |
+| takeoff 15/15 | ✅ z 4.79-5.13 m，全部 OFFBOARD |
+| TCP 39001 | ✅ LISTENING |
+| prepare 批次 | ❌ FAILURE(A02)，ticks=1605；A02 终态 HOLD（避碰规划无解已知类） |
+
+### 内存/资源门禁（本修复核心判据）——全部 PASS
+
+| 判据 | 实测 |
+|---|---|
+| planner 存活 | ✅ 15/15，无死亡/bad_alloc/SIGABRT/-9 |
+| 每 planner RSS | ✅ 11-12 MB 稳定平台（修复前 5.9-12.0 GiB） |
+| host 内存 | ✅ 峰值可用 20 GiB，无 OOM/swap |
+| OFFBOARD | ✅ 15/15 全程保持 |
+| relay 实测频率 | ✅ 30.000 Hz；max 间隔 0.034 s < 0.2 s |
+| memory events | ✅ 无 OOM-kill/-6/-9 |
+
+结论：OOM 修复 15-UAV 判据（内存平台、无 OOM/死、OFFBOARD、30Hz）全部通过；prepare 任务级 FAILURE 属既有避碰无解类别，非本次 OOM 根因；整轮按 §8 FAIL 清理（0 残留，日志存 `.ros_home/log/headless_test/`）。
+
+## 4. 结论与遗留
+
+- 根因（`[0,1]` 外推采样 + 无界 point set + 三次 QR）已修复；内存门禁/全量自动测试/500/2000 次压力全部通过；15-UAV 内存平台与无 OOM 判据通过。
 - residual 发散检测采用系统幅值相关阈值（`residual.norm() > 1e-3 * (||A||∞*(||x||+1)+||b||+1)`），无误伤正常段。
-- 待验收：15-UAV active prepare 端到端（受 cgroup/watchdog 保护）——本记录先归档自动测试与压力证据，15-UAV 验收单独轮次。
+- 遗留：15 机密集编队 prepare 任务级 FAILURE（A02/HOLD）——避碰规划无解类别，与 OOM 无关，继续由既有避碰改进方向处理。
 - 未验证项：多机走廊式/并发避碰（已知问题，见 plans/README「换位/三机/编队未通过」）、Phase 6 实机。
