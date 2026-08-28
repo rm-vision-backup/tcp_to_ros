@@ -85,6 +85,13 @@
 > **实现已提交；本轮 memory-specific observations PASS；计划级 15-UAV acceptance FAIL（prepare 返回 FAILURE(A02/HOLD)），需修复当前任务缺陷后重跑。**
 > A02 具体根因是否属原 OOM 修复范围，不改变按冻结计划 §15 判 FAIL 的事实。
 
+### 260828 复审第 2 轮干净重测（用户指示）
+
+干净重启（全 clean → 15 模型 → 15 套 onboard active → bridge/backend/标定 ready → TAKEOFF 15/15 → TCP → prepare 重测）。
+第 2 轮 prepare 重测运行中（ticks≈1571，较上轮 284 明显推进更多），因用户观察 UAV9-12 未起飞而主动中断停止。
+中断后无条件全清理（0 残留、812 端口 free、日志保留 `.ros_home/log/headless_test/07_task_prepare_replay.log`）。
+计划级 15-UAV acceptance 仍未通过，按冻结计划 §15 判 FAIL，需再次修复后重跑整轮。
+
 ## 4. 结论与遗留
 
 - 根因（`[0,1]` 外推采样 + 无界 point set + 三次 QR）已修复；OOM 修复 + 260828 复审（退化段状态机、动力学不可行拒发、资源分类方式 B、setrlimit 检查）全部落地。
