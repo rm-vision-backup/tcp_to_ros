@@ -92,9 +92,42 @@
 中断后无条件全清理（0 残留、812 端口 free、日志保留 `.ros_home/log/headless_test/07_task_prepare_replay.log`）。
 计划级 15-UAV acceptance 仍未通过，按冻结计划 §15 判 FAIL，需再次修复后重跑整轮。
 
+### 260828 复审第 3 轮干净重测（用户指示：prepare 无头测试；本次记录）
+
+- 时间：2026-08-28 21:20-21:31 CST；干净重测流程与 §3 相同（cleanup → 15 模型 → 15 套 onboard
+  active 一次性启动 → bridge/backend → 标定 ready → `offboard_takeoff_15.py 1..15` 全成功 z≈5m →
+  TCP 39001 → `run.sh task prepare 180`）。本次 15/15 全部完成 TAKEOFF（无第 2 轮 UAV9-12 未起飞问题）。
+- **prepare 结果：`FAILURE(A03/HOLD)`，ticks=1765（约 88s 收口，非任务 timeout）**。
+- 各机终态（exec_state 快照）：**11/12 COMPLETED**（A01/A02/A04-A12，全部到位，z≈12.0m，
+  位置与目标点一致），**A03 HOLD**（UAV3 停于 local (45.26,-17.63,11.997)，目标 (45.0,-17.5,12.0)，
+  3D 偏差 ≈0.29m）。
+- A03 根因链：UAV3 最后一段轨迹（traj_id=90）在目标 0.29m 处耗尽，未满足 0.2m+`arrival_stable_s`
+  的 COMPLETED 判据（`checkArrival` 误差超限且 elapsed>duration 的看门狗路径）→ exec_state HOLD →
+  executor `_wait_for_terminal` 将意外 HOLD 映射 `COMMAND_HELD` 上报 FAILED → backend 按
+  `completion_policy=ALL` 判整组 `FAILURE(A03)` 并对活动机安全 HOLD 收口。无 `EGO_PLAN_FAILED`、
+  无 `MIN_DISTANCE_BREACH`、无 emergency/制动记录；属**任务级终点到达精度缺陷**
+  （与前两轮 A02/A05 `EGO_PLAN_FAILED` 同类避碰/终点约束问题，非 OOM 范围）。
+- 本轮内存/资源/频率判据——**全部 PASS**：
+
+| 判据 | 实测 |
+|---|---|
+| planner 存活 | ✅ 15/15，无死亡/bad_alloc/-6/-9 |
+| 每 planner RSS | ✅ 11.76-12.41 MB 平台（15 个核心 planner，总 180 MB） |
+| host 内存 | ✅ available 19.5 GiB，无 OOM/swap |
+| OFFBOARD | ✅ 采样 UAV1/3/7/12 armed=True / mode=OFFBOARD 保持 |
+| relay 频率 | ✅ `/mavros/setpoint_raw/local` 直接实测 **30.000 Hz**，max 间隔 **0.035 s**（<0.2s 契约） |
+| planner candidate | ✅ `/setpoint/ego` 实测 30.000 Hz（max 间隔 0.036s） |
+| memory events | ✅ dmesg/journal 无新增 OOM（仅 Aug-27 修复前历史记录） |
+
+- 计划级状态更新（§4.1 判定口径不变）：**实现已提交；memory-specific observations PASS（第 3 轮）；
+  计划级 15-UAV acceptance 仍 FAIL**。第 3 轮 11/12 COMPLETED 较前两轮（FAILURE(A02/A05
+  EGO_PLAN_FAILED)、第 1 轮 FAILURE(A05)、第 2 轮中断）有显著推进，但 A03 未达终点容差仍使整轮 FAIL。
+
 ## 4. 结论与遗留
 
 - 根因（`[0,1]` 外推采样 + 无界 point set + 三次 QR）已修复；OOM 修复 + 260828 复审（退化段状态机、动力学不可行拒发、资源分类方式 B、setrlimit 检查）全部落地。
 - residual 发散检测采用系统幅值相关阈值（`residual.norm() > 1e-3 * (||A||∞*(||x||+1)+||b||+1)`），无误伤正常段。
-- 遗留：15 机密集编队 prepare 任务级 FAILURE（A02/HOLD）——避碰规划无解类别；修复后需重跑整轮计划级验收。
+- 遗留：15 机密集编队 prepare 任务级 FAILURE（第 3 轮 A03/HOLD——终点 0.29m 偏差未满足 0.2m
+  到达判据，checkArrival 看门狗转 HOLD；前两轮 A02/A05 为 EGO_PLAN_FAILED 避碰规划无解）——
+  均属避碰/终点约束下任务级缺陷，修复后需重跑整轮计划级验收。
 - 未验证项：多机走廊式/并发避碰（已知问题，见 plans/README「换位/三机/编队未通过」）、Phase 6 实机。

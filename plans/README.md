@@ -216,10 +216,13 @@ GCS_A 必须：
   setrlimit 返回检查。测试（260828 重跑，完整 suite filter）：受限短末段 7 tests、ego_planner_driver
   **172 tests 0 failure**、全工作区 **303 tests 0 errors 0 failures**、500/2000 次压力（完整
   `ShortFinalSegment.*` 前缀）均过 RSS 门禁。**计划级 15-UAV active prepare 验收状态（260828 修正，
-  §4.1）**：实现已提交；memory-specific observations PASS（上一轮 15 机：planner RSS 11-12 MB、
-  OFFBOARD 15/15、relay 30.000 Hz / max 间隔 0.034 s、无 OOM/−6/−9）；prepare 批次上一轮返回
-  **FAILURE(A02/HOLD)** ⇒ 按冻结计划 §15 整轮判 **计划级 acceptance FAIL**，需修复当前任务缺陷后重跑
-  整轮 15-UAV acceptance（A02 根因是否属 OOM 范围不改变判 FAIL 事实）。
+  §4.1）**：实现已提交；memory-specific observations PASS（第 3 轮重测 15 机：planner RSS
+  11.76-12.41 MB、OFFBOARD 15/15 保持、relay 直接实测 30.000 Hz / max 间隔 0.035 s、planner
+  candidate 30.000 Hz、host available 19.5 GiB、无 OOM/−6/−9）；prepare 批次第 3 轮返回
+  **FAILURE(A03/HOLD)**（11/12 COMPLETED，A03 终点 0.29m 偏差未满足 0.2m 到达判据 → checkArrival
+  看门狗转 HOLD → executor COMMAND_HELD；前两轮 FAILURE(A02/A05 EGO_PLAN_FAILED)）⇒ 按冻结计划 §15
+  整轮判 **计划级 acceptance FAIL**，需修复当前任务缺陷后重跑整轮 15-UAV acceptance（A03 根因是否
+  属 OOM 范围不改变判 FAIL 事实）。
 - **换位/三机/编队未通过（2026-08-27）**：双机正交 8/9 PASS，但双机交换（`reciprocal_15sitl.py --swap`）
   与三机交叉（`triple_cross_15sitl.py`）未通过（三机最小 3D 0.563m 破距、UAV2 HOLD_FAILED、
   UAV3 MIN_DISTANCE_BREACH、UAV3 横向摆动 5.1m）；prepare 批次 EGO_PLAN_FAILED。机载避碰对
