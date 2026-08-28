@@ -222,7 +222,10 @@ GCS_A 必须：
   **FAILURE(A03/HOLD)**（11/12 COMPLETED，A03 终点 0.29m 偏差未满足 0.2m 到达判据 → checkArrival
   看门狗转 HOLD → executor COMMAND_HELD；前两轮 FAILURE(A02/A05 EGO_PLAN_FAILED)）⇒ 按冻结计划 §15
   整轮判 **计划级 acceptance FAIL**，需修复当前任务缺陷后重跑整轮 15-UAV acceptance（A03 根因是否
-  属 OOM 范围不改变判 FAIL 事实）。
+  属 OOM 范围不改变判 FAIL 事实）。**第 4 轮（0.5m 到达阈值生效，2026-08-28 22:40-22:47）**：
+  清空 `.ros_home` + 删 `.tmp` safety_logger 后干净重测，prepare **SUCCESS**（failed=[]、ticks=1551，
+  12/12 COMPLETED，A03 偏差 0.2m 在新 0.5m 阈值内），relay 30.000Hz、planner RSS 11.6-12.5MB、
+  OFFBOARD 保持、无 OOM ⇒ **计划级 15-UAV acceptance 首次通过（PASS）**。
 - **到达阈值放宽 0.2m→0.5m（2026-08-28 用户决策）**：`arrival_reach_thresh_m` 由 0.2m 放宽为
   **0.5m**（`checkArrival` 分支 B：距最终关键点 <0.5m 且稳定 `arrival_stable_s`=1.0s → COMPLETED）。
   依据：第 3 轮 prepare 实测 UAV3 终点偏差 0.29m 停在 0.2m 判据外 → 看门狗 HOLD → COMMAND_HELD；

@@ -131,6 +131,31 @@
   计划级 15-UAV acceptance 仍 FAIL**。第 3 轮 11/12 COMPLETED 较前两轮（FAILURE(A02/A05
   EGO_PLAN_FAILED)、第 1 轮 FAILURE(A05)、第 2 轮中断）有显著推进，但 A03 未达终点容差仍使整轮 FAIL。
 
+### 260828 复审第 4 轮干净重测（0.5m 到达阈值生效，prepare **SUCCESS**）
+
+- 前置：用户指示清空 `.ros_home`、删除 `.tmp` 的 `safety_logger_queue_*/test_*`；到达阈值
+  `arrival_reach_thresh_m` 已由 0.2m 放宽为 0.5m（launch 值 0.5、C++ 默认 0.5）。
+- 时间：2026-08-28 22:40-22:47 CST；流程与 §3 相同（cleanup → 15 模型 → 15 套 onboard active →
+  bridge/backend → 标定 → takeoff 15/15 z≈5m → TCP 39001 → `run.sh task prepare 180`）。
+- **prepare 结果：`SUCCESS`，`failed_robot_ids=[]`，ticks=1551（约 77.5s）**——12/12 全部 COMPLETED，
+  首次计划级整轮通过。
+- 各机终态：A01/A02/A03/A04-A12 全部 COMPLETED（exec_state 快照 + backend 判定），其中 **UAV3(A03)
+  COMPLETED**（local (44.88,-17.69,12.00)，目标 (45.0,-17.5,12.0)，偏差 ≈0.2m < 0.5m 新阈值）——
+  第 3 轮 0.29m 偏差导致看门狗 HOLD 的问题消失。
+- 内存/资源/频率判据——**全部 PASS**：planner RSS 11.64-12.46 MB（15 台）、relay
+  `/mavros/setpoint_raw/local` 30.000 Hz（max 间隔 0.034s）、OFFBOARD 保持、host available 20 GiB、
+  无 OOM/−6/−9。
+- 绘图更新（`.tmp/plot/`，`analyze_latest_flight.py --goal-epoch 1787928197.255 --task-ticks 1551`，
+  cohort=15 台 `sitl_iris_*/log/2026-08-28/14_40_54|55.ulg`）：**UAV1-UAV2 最小 3D 1.24m（无 1m 破距）、
+  `actual_runtime_1m_breached=False`、`structured_any_emergency=False`**；UAV2 终点误差
+  0.10m；峰值速度 1.27-1.51 m/s。
+- 过程中的环境处置（非任务缺陷）：① 首次 GCS 启动在同一命令内连续拉起 bridge+backend 导致 11310
+  run_id 冲突 → 分开启动解决；② TCP server 首启时 39001 被某 UAV `gps_bias_node` 的 rospy XMLRPC
+  随机端口恰巧占用（`bind: Address already in use`，task 连错服务返回假 FAILURE）→ 整轮 clean 重启
+  未复现（低概率端口巧合）。
+- **计划级状态（本轮）**：**memory-specific observations PASS；计划级 15-UAV acceptance 通过
+  （prepare SUCCESS）**，按冻结计划 §15 判 PASS。需在 plans/README 更新状态为首次完整通过。
+
 ## 4. 结论与遗留
 
 - 根因（`[0,1]` 外推采样 + 无界 point set + 三次 QR）已修复；OOM 修复 + 260828 复审（退化段状态机、动力学不可行拒发、资源分类方式 B、setrlimit 检查）全部落地。
