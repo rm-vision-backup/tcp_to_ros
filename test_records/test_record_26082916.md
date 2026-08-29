@@ -89,6 +89,7 @@
 | runtime smoke | roscore + `ego_planner_driver.launch`；`rosparam dump` 快照 | 15 项参数全 OK（见 §4） |
 | 非法值 fail-fast | `_emergency_ttc_s:=5.0 _warning_ttc_s:=3.0` 启动 | FATAL `refusing to start` |
 | 全量回归 | `catkin build/run_tests -j1 -p1`（6 包） | **317 tests 0 failures** |
+| 受保护 prepare 回归 | headless 15-UAV 全栈（sim/onboard/gcs/tcp/takeoff/calibration/task） | **SUCCESS**（failed=[]、ticks=1621） |
 
 ## 4. runtime 参数快照（planner smoke）
 
@@ -112,6 +113,11 @@ collision_check_rate_hz=10.0、safety_supervisor_mode=active。
 
 ## 6. 未验证项
 
-- **受保护 prepare 回归**：15-UAV SITL prepare（1.0m clearance 三维门禁、Safety active、
-  30Hz/0.2s/0.1s 契约、bridge/GPS/intent 语义无回归）——headless 栈执行后补录。
+- **受保护 prepare 回归**：headless 15-UAV 全栈执行 **SUCCESS**（failed=[]、ticks=1621，
+  planner RSS 11.6-12.4 MB、calibration ready 15/15、UAV1 COMPLETED），1.0m 三维门禁 /
+  Safety active / 30Hz / 0.2s / 0.1s / bridge-GPS-intent 语义无回归。
 - PX4 参数 `COM_RCL_EXCEPT`/`NAV_RCL_ACT` 实机生效（仿真不产生 RC 告警差异）。
+- headless 流程备注：gcs 阶段 bridge/backend 两 launch 在空 master 上并发 auto-start
+  存在竞态（bridge 可能 port-in-use 死亡）→ 需先起一个建立 master 再起另一个，或
+  gcs 后检查 `swarm_bridge` 存在并用 `gcs_bridge_only` 重启；calibration 要求 UAV
+  disarm 时完成（takeoff 前），否则 backend `require_calibration_ready=true` 拒单。

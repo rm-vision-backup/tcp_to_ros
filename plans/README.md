@@ -284,8 +284,8 @@ GCS_A 必须：
 - **topology/backend/transport**：Group A sim topology 唯一 owner 迁移至
   `swarm_topology_bridge`；`backend_defaults.yaml`/`transport_defaults.yaml` canonical。
 - **验证**：全量回归 317 tests 0 failures；runtime smoke 15 项参数 OK（快照
-  `.tmp/parameter_snapshots/planner_smoke.yaml`）；非法值 fail-fast。
+  `.tmp/parameter_snapshots/planner_smoke.yaml`）；非法值 fail-fast；
+  **受保护 prepare 回归 SUCCESS**（ticks=1621、12/12 COMPLETED）。
 - **契约无回归**：1.0m 三维门禁、Safety active、planner/relay 30Hz、candidate timeout 0.2s、
   TimedTrajectory 0.1s、bridge/GPS/intent/PositionTarget 语义。
-- **未验证**：受保护 prepare 回归（headless 栈补录）。
 
