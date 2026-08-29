@@ -7,12 +7,13 @@
   <arg name="confirm_retries" default="2" />
   <arg name="confirm_retry_interval_s" default="0.2" />
   <arg name="confirm_deadline_s" default="4.0" />
-  <arg name="link_safety_config" default="$(find tcp_to_ros)/config/link_safety_defaults.yaml" />
   <arg name="formation_offsets_file" default="$(find tcp_to_ros)/config/formation_offsets.yaml" />
   <arg name="require_calibration_ready" default="true" />
 
   <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
-    <rosparam command="load" file="$(arg link_safety_config)" />
+    <!-- canonical backend/link health 默认（backend_defaults.yaml）；launch 仅
+         identity/path/deployment override（map_file/formation_offsets_file 等）。 -->
+    <rosparam command="load" file="$(find tcp_to_ros)/config/backend_defaults.yaml" />
     <param name="action_name" value="$(arg action_name)" />
     <param name="emergency_hold_service" value="$(arg emergency_hold_service)" />
     <param name="map_file" value="$(arg map_file)" />

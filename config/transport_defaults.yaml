@@ -1,0 +1,9 @@
+# TCP server（transport）参数 canonical 默认（implementation_plan_26082916 §7）。
+# 加载方式：tcp_server_node 私有 namespace（tcp_to_ros_mock.launch rosparam load）。
+# launch 可作 deployment override（host/port 等）。
+
+host: 0.0.0.0
+port: 39001
+action_name: /group_a/execute_task
+state_topic: /group_a/group_task_state
+emergency_hold_service: /group_a/emergency_hold

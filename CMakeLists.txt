@@ -72,6 +72,7 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_fixed_formations.py)
   catkin_add_nosetests(test/test_tcp_disconnect_safety.py)
   catkin_add_nosetests(test/test_tcp_port_policy.py)
+  catkin_add_nosetests(test/test_parameter_wiring.py)
 endif()
 
 install(DIRECTORY launch/

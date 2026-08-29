@@ -1,0 +1,21 @@
+# GCS_A backend / link health 参数 canonical 默认（implementation_plan_26082916 §7）。
+# 加载方式：gcs_a_backend_node 私有 namespace（gcs_a_backend*.launch rosparam load）。
+# 路径类（map_file/formation_offsets_file）为 launch deployment override，不放 YAML。
+# link_* 默认即生产确认值：link_suspect_after_s=10.0、link_lost_after_s=15.0、
+# link_healthy_window_s=3.0（与 link_safety_defaults.yaml 一致）。
+
+action_name: /group_a/execute_task
+emergency_hold_service: /group_a/emergency_hold
+confirm_wait_s: 1.0
+confirm_retries: 2
+confirm_retry_interval_s: 0.2
+confirm_deadline_s: 4.0
+hold_batch_size: 4
+hold_retry_count: 2
+hold_retry_interval_s: 0.5
+require_calibration_ready: true
+link_suspect_after_s: 10.0
+link_lost_after_s: 15.0
+link_healthy_window_s: 3.0
+link_health_topic: /group_a/uav_link_health
+link_health_pre_task_wait_s: 10.0

@@ -178,8 +178,10 @@ class GcsABackendNode:
         enabled = [(item.uav_id, item.exec_target) for item in self.identity_map.uavs if item.enabled]
         self.link_monitor = UavLinkMonitor(
             enabled,
-            float(rospy.get_param("~link_suspect_after_s", 3.0)),
-            float(rospy.get_param("~link_lost_after_s", 5.0)),
+            # fallback 与 backend_defaults.yaml 生产值一致（10.0/15.0/3.0），
+            # 防止缺失 YAML 时漂移（implementation_plan_26082916 §7）。
+            float(rospy.get_param("~link_suspect_after_s", 10.0)),
+            float(rospy.get_param("~link_lost_after_s", 15.0)),
             float(rospy.get_param("~link_healthy_window_s", 3.0)),
         )
         self.link_health_publisher = rospy.Publisher(

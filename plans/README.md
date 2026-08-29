@@ -2,7 +2,8 @@
 
 > 本目录是 `tcp_to_ros` 项目的开发入口：维护 **Phase 编号约定**、**全局设计规约**、
 > **实施计划**与**当前状态**。新会话从此文件开始阅读。
-> 测试证据按期归档：`test_records/test_record_2608xxxx.md`。
+> 计划文件名规范：`implementation_plan_yymmddhh.md`；测试记录文件名规范：`test_records/test_record_yymmddhh.md`。
+> 其中 `yymmddhh` 为文件生成时间的两位年、两位月、两位日、两位小时（24 小时制）。
 
 ## Phase 编号约定（唯一权威）
 
@@ -88,6 +89,7 @@ GCS_A 必须：
 | `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
 | `implementation_plan_26082621.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **已实施（2026-08-26，代码+单测 257 tests 0 failure；SITL 双机验收进行中）** |
 | `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **已实施（2026-08-28，代码+单测+PSI；全量 295 tests 0 failure；15-UAV prepare 验收进行中）** |
+| `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -254,11 +256,36 @@ GCS_A 必须：
 | `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（已实施） |
 | `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，已实施） |
 | `plans/implementation_plan_26082722.md` | 轨迹末端 OOM 最终修复：真实 `[0,T]` 有界采样、资源边界、single-QR 与回归验收（已实施 2026-08-28） |
+| `plans/implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计（已实施 2026-08-29，见 §状态-26082916） |
 | `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（历史） |
 | `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
 | `test_records/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
 | `test_records/test_record_26082602.md` / `26082621.md` / `26082700.md` | 26082602 / 26082621 / prepare 15 机全 active 与软着陆修复记录 |
 | `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁（本记录） |
+| `test_records/test_record_26082916.md` | 参数配置整理与规范化：canonical YAML、接线、校验、flock 清理与回归记录 |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |
+
+## 状态-26082916：参数配置整理与规范化（2026-08-29 已实施）
+
+- **inventory/schema**：`.tmp/notes/parameter_inventory_26082916.md`；来源优先级
+  canonical YAML → launch deployment override → 源码校验。
+- **ego_planner_driver**：三份 canonical YAML（planner/safety/resource_limits）；接入
+  `order`/`lambda_terminal`/`feasibility_tolerance`/`plan_fail_timeout_s`/`replan_failure_fatal`/
+  `yield_hovering_velocity_mps`/`emergency_minimum_duration_s`/`emergency_maximum_duration_s`/
+  `neighbor_intent_stale_s`；删除无效 `planning_horizon` 字段与 `neighbor_stale_policy`/
+  `neighbor_missing_policy` 假配置；`lambda_feasibility` 全链路统一 0.5；yield gate 用统一
+  clearance（不再写死 0.5）；集中语义校验 fail-fast（finite/正数/TTC 单调/枚举白名单）。
+- **swarm_uav_executor**：executor/ego_swarm/mavros_position_legacy 三份 YAML；
+  `waypoint_densify_spacing` authoritative 3.0（修 YAML 2.0/launch 3.0 漂移）；relay 参数校验。
+- **safe_valley_exp**：删除 flock legacy 示例（含 `uav_offboard_sim/real.launch`）；
+  `gps_bias_defaults.yaml` 唯一来源 + 参数校验。
+- **topology/backend/transport**：Group A sim topology 唯一 owner 迁移至
+  `swarm_topology_bridge`；`backend_defaults.yaml`/`transport_defaults.yaml` canonical。
+- **验证**：全量回归 317 tests 0 failures；runtime smoke 15 项参数 OK（快照
+  `.tmp/parameter_snapshots/planner_smoke.yaml`）；非法值 fail-fast。
+- **契约无回归**：1.0m 三维门禁、Safety active、planner/relay 30Hz、candidate timeout 0.2s、
+  TimedTrajectory 0.1s、bridge/GPS/intent/PositionTarget 语义。
+- **未验证**：受保护 prepare 回归（headless 栈补录）。
+

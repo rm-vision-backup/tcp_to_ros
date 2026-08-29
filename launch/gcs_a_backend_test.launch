@@ -6,7 +6,8 @@
   <arg name="confirm_deadline_s" default="4.0" />
 
   <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
-    <rosparam command="load" file="$(find tcp_to_ros)/config/link_safety_defaults.yaml" />
+    <!-- canonical backend 默认（backend_defaults.yaml）；test 差异仅 mock executor。 -->
+    <rosparam command="load" file="$(find tcp_to_ros)/config/backend_defaults.yaml" />
     <param name="action_name" value="/group_a/execute_task" />
     <param name="emergency_hold_service" value="/group_a/emergency_hold" />
     <param name="map_file" value="$(arg map_file)" />
