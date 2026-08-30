@@ -330,3 +330,37 @@ install-space 启动 topology_group_a_sim.launch
 - 按需 commit，不 push。
 - 删除 `safe_valley_exp` 前必须先完成迁移验证。
 - 不覆盖或回滚用户已有修改。
+
+---
+
+## 11. 计划外修改（260830 15-UAV prepare 回归暴露，测试记录见 test_records/test_record_26083018.md §6）
+
+实施完成后 15-UAV prepare 全 clean 回归首轮即 `FAILURE(A05)`，经三轮迭代定位根因并修复。
+以下修改不在本计划原范围内，追加记录。
+
+### 11.1 安全预测窗 5s → 3s（ego_planner_driver `7010dc5`）
+
+- 现象：SafetyPredictor 预测 UAV6→UAV5 min_d=0.984m（<1m）触发 EMERGENCY → replan 失败收口
+  → 整组 FAILURE(A05)；实际最小 3D 距离 1.556m（未破 1m），预测-实际偏差 -0.57m。
+- 根因：5s 预测窗外推**高频 replan（~0.8s 换一次 traj_id）产生的短命 intent 尾段**——双方
+  intent 生命周期远短于预测窗，外推触及未执行轨迹 → 假 EMERGENCY。
+- 修改：`safety_prediction_horizon_s` 5.0→3.0（`config/safety_defaults.yaml` canonical、
+  `safety_predictor.h` 结构体默认、`ego_planner_driver_node.cpp` fallback 三处同步；
+  README 参数表同步）。
+- 效果：三轮回归 SUCCESS；12 机 EMERGENCY 计数全 0；UAV5-6 预测 min_d 提升到 1.297m（>1m）。
+
+### 11.2 SLOW 候选删除实验与回滚（ego_planner_driver `9540a89` → `88710d4`）
+
+- 初判：SLOW（减速等待）候选在交叉场景"轨迹挡路"疑似触发源，删除后第 2 轮回归仍
+  `FAILURE(A05, A06)` 且预测偏差更大（-0.94m）→ 证明 SLOW 非根因（5s 窗放大假预测的伴随现象）。
+- 处置：`git revert 9540a89`（`88710d4`）恢复 SLOW 候选，最终回归（+3s 预测窗）SUCCESS。
+- 结论：SLOW 候选保留；预测窗缩短为唯一根因修复。
+
+### 11.3 测试基础设施修复（`.tmp/`，不入 git）
+
+- `run.sh gcs` 组合启动存在 11310 竞态（bridge/backend 两个 roslaunch 同时 auto-start master，
+  backend XML-RPC 冲突退出）→ 改顺序 `gcs_bridge_only` → 就绪 → `gcs_backend_only`。
+- 编排脚本标定检测由 grep backend 日志（stdout 缓冲导致 0 行）改为
+  `rosparam get /group_a/calibration_ready`。
+- px4 sitl 不注册 ROS 节点：sim 就绪判断用 Gazebo 节点 + `ps` px4 进程数，而非 `rosnode list grep sitl_`。
+
