@@ -32,6 +32,8 @@ rm -rf .ros_home && mkdir -p .ros_home/log
 ```bash
 bash .tmp/headless_test/run.sh sim          # gui:=false, master 11300, gazebo 11345
 # 等待：15 个 px4 进程 + 日志 Spawn status = 15
+# 注：px4 sitl 进程**不注册 ROS 节点**（rosnode list 仅见 /gazebo /rosout），
+#     就绪判定用 `ps aux | grep -c '[p]x4 '`（≥15），不要用 `rosnode list | grep sitl_`。
 ```
 
 ### 阶段 2：机载层（15 机独立 Master，**统一 active 一次性启动，不重启**）
@@ -52,7 +54,8 @@ bash .tmp/headless_test/run.sh tcp                # tcp_server_node 39001
 ### 阶段 4：标定（**必须在 takeoff 前，且各机 disarm**）
 ```bash
 # 等 /group_a/calibration_ready = True（GCS 冻结 gp_origin 统一坐标系）
-rostopic echo -n 1 /group_a/calibration_ready   # 期望 data: True
+rosparam get /group_a/calibration_ready         # 期望 true（权威判据；backend 日志 stdout 缓冲可能为空，勿用日志判断）
+rostopic echo -n 1 /group_a/calibration_ready   # 或话题方式（期望 data: True）
 # 每机 gp_origin_confirmed 置位（坐标系统一后 local 距离 = 世界距离）
 ```
 > 标定要求 A01-A06 全 disarm + 数据连续 2s + 航向 ≤30°；**armed 时 set_gp_origin 被拒**，
@@ -84,8 +87,13 @@ bash .tmp/headless_test/cleanup.sh           # 逆序停止 TCP→GCS→onboard�
 # 断言：gazebo/px4/rosmaster/mavros 进程数 = 0；测试端口（39001/11300/11310..11325）全部释放
 ```
 - **测试结束（无论 PASS / FAIL / 超时）必须立即执行本阶段**；
+- **测试完成后，如无需在线收集信息，先停止全部仿真进程，再进行数据分析**：
+  数据分析（`.tmp/plots/analyze_latest_flight.py` ULog 绘图、planner/console 日志分析、
+  离线回放 `replay_intent_consistency.py` 等）**全部读取落盘文件**（ULog/日志/JSON），
+  **不依赖仿真进程运行**；而仿真进程持续占用 CPU/内存且可能覆盖/追加日志，干扰分析。
+  仅当需要**在线收集**（实时订阅话题、录制 rosbag、观察实时 exec_state/机间距离）时才保持进程。
 - **禁止任何"就地恢复 / 单机重启 / 二次启动"动作**——需要重跑一律先 cleanup 断言无残留，
-  再回到阶段 0 整体干净重启（`startup_ego_sitl.sh`）。
+  再回到阶段 0 整体干净重启（`startup_ego_sitl.sh` 或 `.tmp/scripts/run_15uav_prepare.sh`）。
 
 ## 3. 套壳脚本（从仿真层到软起动）
 
@@ -106,16 +114,19 @@ bash .tmp/scripts/startup_ego_sitl.sh [UAV_LIST] [SAFETY_MODE]
 bash .tmp/headless_test/run.sh <phase>
 # phase: sim | onboard | gcs | tcp | takeoff | task [name] | status | cleanup | uav_z <idx>
 ```
-- `gcs` 一次性启动 bridge+backend（有 11310 竞态风险，推荐用 `gcs_bridge_only`/`gcs_backend_only` 分步）；
+- `gcs` 一次性启动 bridge+backend（**已废弃**：两 roslaunch 同时 auto-start master 11310 竞争
+  XML-RPC，backend 冲突退出；一律用 `gcs_bridge_only` → 就绪 → `gcs_backend_only` 分步）；
 - 所有后台进程 pid 写入 `$HLOG/*.pid`，供 `cleanup.sh` 精确逆序停止。
 
 ### 3.3 其他辅助
 | 脚本 | 用途 |
 |---|---|
 | `.tmp/headless_test/cleanup.sh` | 逆序停止全部测试进程 + 端口/进程残留检查 |
-| `.tmp/headless_test/status.sh` | 各阶段就绪状态检查（px4/master/服务/高度） |
+| `.tmp/headless_test/status.sh` | 各阶段就绪状态检查（px4/master/服务/高度；**px4 就绪用进程数，不用 rosnode list**） |
+| `.tmp/scripts/run_15uav_prepare.sh` | **15-UAV prepare 全自动编排（260830 起）**：cleanup → sim → onboard → gcs 分步 → tcp → takeoff → task，阶段间轮询就绪；标定检测用 `rosparam get /group_a/calibration_ready` |
+| `.tmp/scripts/startup_ego_sitl.sh` | 一键启动至 takeoff（阶段 0→5，双机/小规模推荐） |
 | `.tmp/scripts/return_land_all.py` | RTL 落地全部测试机（任务后收尾） |
-| `.tmp/scripts/run_headless_prepare_26082415.sh` | 旧式 prepare 编排（逐机独立启动 + 就绪补充轮） |
+| `.tmp/scripts/run_headless_prepare_26082415.sh` | 旧式 prepare 编排（逐机独立启动 + 就绪补充轮，**已过时，仅历史参考**） |
 | `verification/ego_smoke/reciprocal_15sitl.py` | 双机正交避碰编排（预检 → staging → 屏障 START → 采集 → HOLD） |
 | `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停） |
 
@@ -168,3 +179,40 @@ bash .tmp/headless_test/run.sh <phase>
   3. 任务中不做任何机载层层面的操作（重启/参数注入/单机命令）。
 - **处理**：出现即整体 `cleanup.sh` 收口 → 记录退出日志（`.ros_home/log/<会话>/uav_executor_UAVn-*.log`、
   `rosout.log`）→ 从干净环境重跑；**绝不就地重启该机**。
+
+## 7. 数据分析原则（先停止仿真，再做分析）
+
+> **测试完成后，如果不需要在线收集信息，先执行 `cleanup.sh` 停止全部仿真进程，再进行数据分析。**
+
+### 7.1 为什么必须先停仿真
+
+- 数据分析全部读取**落盘文件**（ULog、planner/console 日志、JSON/CSV），**不依赖进程运行**：
+  - ULog 绘图：`.tmp/plots/analyze_latest_flight.py --goal-epoch <goal> --task-ticks <ticks>`
+  - 离线回放：`.tmp/scripts/replay_intent_consistency.py --pair UAVn,UAVm --start <t> --end <t>`
+  - 日志/metrics 分析：`runtime_logs/ego_planner/`、`.ros_home/log/headless_test/`、`.tmp/plots/*.json`
+- 仿真进程持续占用 CPU/内存（15 机 SITL 达数十进程），且可能**继续追加/覆盖日志与 ULog**，
+  干扰对"本次测试结果"的分析；保持运行只会拖慢分析并污染证据。
+
+### 7.2 何时需要在线收集（才保持进程）
+
+仅以下场景需要仿真进程存活：
+
+- 实时订阅话题（`rostopic echo` exec_state / 机间距离 / setpoint 频率等）；
+- 录制 rosbag（`rosbag record` 在线话题）；
+- 需要二次观测/人工 QGC 观察实时飞行。
+
+在线收集完成后，同样立即 `cleanup.sh` 收口，再基于收集到的落盘数据离线分析。
+
+### 7.3 分析命令模板（cleanup 之后）
+
+```bash
+# 1. ULog 轨迹/速度/机间距绘图（goal-epoch 取自 backend 日志 "GCS_A goal ..."，ticks 取自 07_task_*.log）
+python3 .tmp/plots/analyze_latest_flight.py --goal-epoch <goal_epoch> --task-ticks <ticks>
+
+# 2. 机对回放（预测 vs 实际偏差、self_odom_dev、traj churn）
+python3 .tmp/scripts/replay_intent_consistency.py --pair UAV5,UAV6 --start <t0> --end <t1>
+
+# 3. 结构化事件/EMERGENCY 统计
+grep -c 'level=EMERGENCY' runtime_logs/ego_planner/UAV*.log
+```
+
