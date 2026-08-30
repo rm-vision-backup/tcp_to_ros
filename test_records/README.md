@@ -60,7 +60,7 @@ rostopic echo -n 1 /group_a/calibration_ready   # 期望 data: True
 
 ### 阶段 5：起飞
 ```bash
-python3 src/safe_valley_exp/scripts/offboard_takeoff_15.py 1..15
+python3 src/swarm_uav_executor/scripts/offboard_takeoff_15_sitl.py 1..15
 # HOLD → arm → OFFBOARD；软起飞 z≈5m 由 ego TAKEOFF 状态自动完成
 # 等待各机高度 >3m
 ```
@@ -117,7 +117,7 @@ bash .tmp/headless_test/run.sh <phase>
 | `.tmp/scripts/return_land_all.py` | RTL 落地全部测试机（任务后收尾） |
 | `.tmp/scripts/run_headless_prepare_26082415.sh` | 旧式 prepare 编排（逐机独立启动 + 就绪补充轮） |
 | `verification/ego_smoke/reciprocal_15sitl.py` | 双机正交避碰编排（预检 → staging → 屏障 START → 采集 → HOLD） |
-| `src/safe_valley_exp/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停） |
+| `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停） |
 
 ## 4. 注意事项
 

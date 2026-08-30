@@ -65,7 +65,7 @@ GCS_A 必须：
 
 ### 安全基线（不可弃用）
 
-- arm/OFFBOARD 软件所有权属于外部本机脚本 `offboard_takeoff_15.py`，不属于 executor 或 GCS START。
+- arm/OFFBOARD 软件所有权属于外部本机脚本 `offboard_takeoff_15_sitl.py`，不属于 executor 或 GCS START。
 - 起飞顺序固定为：完成标定 → 脚本 HOLD（拒绝时回退 AUTO.LOITER）→ arm → OFFBOARD → planner TAKEOFF
   软起飞至 5m → HOLD → executor PREPARE 只检查 armed/OFFBOARD/origin → GCS START 启动已登记任务。
   START 不触发按需起飞，5m TAKEOFF 不属于 MOVE_TO 子阶段。

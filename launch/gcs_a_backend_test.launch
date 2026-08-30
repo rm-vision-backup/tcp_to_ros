@@ -1,20 +1,24 @@
 <launch>
+  <!-- canonical backend 默认（backend_defaults.yaml）；test 差异仅 mock executor。 -->
   <arg name="map_file" default="$(find tcp_to_ros)/config/uav_identity_map.yaml" />
-  <arg name="confirm_wait_s" default="1.0" />
-  <arg name="confirm_retries" default="2" />
-  <arg name="confirm_retry_interval_s" default="0.2" />
-  <arg name="confirm_deadline_s" default="4.0" />
+  <arg name="action_name" default="" />
+  <arg name="emergency_hold_service" default="" />
+  <arg name="confirm_wait_s" default="" />
+  <arg name="confirm_retries" default="" />
+  <arg name="confirm_retry_interval_s" default="" />
+  <arg name="confirm_deadline_s" default="" />
 
   <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
-    <!-- canonical backend 默认（backend_defaults.yaml）；test 差异仅 mock executor。 -->
+    <!-- canonical backend 默认（backend_defaults.yaml）；test 差异仅 mock executor。
+         业务参数仅命令行显式传入时条件写入（implementation_plan_26083018 §3）。 -->
     <rosparam command="load" file="$(find tcp_to_ros)/config/backend_defaults.yaml" />
-    <param name="action_name" value="/group_a/execute_task" />
-    <param name="emergency_hold_service" value="/group_a/emergency_hold" />
     <param name="map_file" value="$(arg map_file)" />
-    <param name="confirm_wait_s" value="$(arg confirm_wait_s)" />
-    <param name="confirm_retries" value="$(arg confirm_retries)" />
-    <param name="confirm_retry_interval_s" value="$(arg confirm_retry_interval_s)" />
-    <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" />
+    <param name="action_name" value="$(arg action_name)" if="$(eval arg('action_name') != '')" />
+    <param name="emergency_hold_service" value="$(arg emergency_hold_service)" if="$(eval arg('emergency_hold_service') != '')" />
+    <param name="confirm_wait_s" value="$(arg confirm_wait_s)" if="$(eval arg('confirm_wait_s') != '')" />
+    <param name="confirm_retries" value="$(arg confirm_retries)" if="$(eval arg('confirm_retries') != '')" />
+    <param name="confirm_retry_interval_s" value="$(arg confirm_retry_interval_s)" if="$(eval arg('confirm_retry_interval_s') != '')" />
+    <param name="confirm_deadline_s" value="$(arg confirm_deadline_s)" if="$(eval arg('confirm_deadline_s') != '')" />
   </node>
 
   <include file="$(find swarm_uav_executor)/launch/uav_executor_mock.launch">

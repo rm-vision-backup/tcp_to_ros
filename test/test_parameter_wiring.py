@@ -12,7 +12,14 @@ from pathlib import Path
 import unittest
 import xml.etree.ElementTree as ET
 
-import yaml
+try:
+    import yaml
+except ImportError:
+    raise ImportError(
+        "PyYAML (python3-yaml) 未安装；test_parameter_wiring.py 依赖它解析 "
+        "canonical YAML（implementation_plan_26083018 §6）。请先安装："
+        "sudo apt install python3-yaml"
+    ) from None
 
 TCP_DIR = Path(__file__).resolve().parents[1]
 CONFIG = TCP_DIR / "config"
@@ -23,6 +30,13 @@ BRIDGE_DIR = TCP_DIR.parents[0] / "swarm_topology_bridge"
 def _load_yaml(path):
     with open(path, encoding="utf-8") as stream:
         return yaml.safe_load(stream)
+
+
+def _param_if(node, name):
+    for item in node.findall("param"):
+        if item.attrib.get("name") == name:
+            return item.attrib.get("if")
+    return None
 
 
 class ParameterWiringTest(unittest.TestCase):
@@ -68,6 +82,41 @@ class ParameterWiringTest(unittest.TestCase):
                      if item.get("command") == "load"]
             self.assertTrue(any("backend_defaults.yaml" in f for f in loads),
                             f"{name} 必须加载 backend_defaults.yaml")
+
+    def test_backend_launches_use_conditional_business_params(self):
+        # implementation_plan_26083018 §3：业务参数（action_name/emergency_hold_service/
+        # confirm_*）arg 默认空，param 仅在命令行显式传入时条件写入；YAML 是唯一默认来源。
+        for name in ("gcs_a_backend.launch", "gcs_a_backend_test.launch",
+                     "gcs_a_backend_fail.launch"):
+            root = ET.parse(str(LAUNCH / name)).getroot()
+            node = next(node for node in root.findall(".//node")
+                        if node.get("type") == "gcs_a_backend_node.py")
+            args = {item.get("name"): item.get("default", "")
+                    for item in root.findall("arg")}
+            for key in ("action_name", "emergency_hold_service",
+                        "confirm_wait_s", "confirm_retries",
+                        "confirm_retry_interval_s", "confirm_deadline_s"):
+                self.assertEqual(args.get(key), "", f"{name} arg {key} 应空默认")
+                self.assertIn(f"arg('{key}')", _param_if(node, key) or "",
+                              f"{name} param {key} 应条件写入")
+            if name == "gcs_a_backend.launch":
+                self.assertEqual(args.get("require_calibration_ready"), "")
+                self.assertIn("arg('require_calibration_ready')",
+                              _param_if(node, "require_calibration_ready") or "")
+
+    def test_mock_launch_transport_params_conditional(self):
+        # transport 默认来自 transport_defaults.yaml；host/port/action/state/hold
+        # 仅命令行显式传入时条件写入。
+        root = ET.parse(str(LAUNCH / "tcp_to_ros_mock.launch")).getroot()
+        node = next(node for node in root.findall(".//node")
+                    if node.get("type") == "tcp_server_node.py")
+        args = {item.get("name"): item.get("default", "")
+                for item in root.findall("arg")}
+        for key in ("host", "port", "action_name", "state_topic",
+                    "emergency_hold_service"):
+            self.assertEqual(args.get(key), "", f"arg {key} 应空默认")
+            self.assertIn(f"arg('{key}')", _param_if(node, key) or "",
+                          f"param {key} 应条件写入")
 
     def test_mock_launch_loads_transport_defaults(self):
         root = ET.parse(str(LAUNCH / "tcp_to_ros_mock.launch")).getroot()

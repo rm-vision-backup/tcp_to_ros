@@ -1,5 +1,8 @@
-link_suspect_after_s: 10.0
-link_lost_after_s: 15.0
-link_healthy_window_s: 3.0
-link_health_topic: /group_a/uav_link_health
-link_health_pre_task_wait_s: 10.0
+# 链路健康参数（历史/测试引用保留；生产加载以 backend_defaults.yaml 为准，
+# 两者内容一致，implementation_plan_26082916 §7）。单位秒。
+
+link_suspect_after_s: 10.0            # 链路怀疑阈值（s，>0）：无状态更新超时判 suspect
+link_lost_after_s: 15.0               # 链路丢失阈值（s，>0）：超时判 lost
+link_healthy_window_s: 3.0            # 健康恢复窗口（s，>0）：持续新鲜时长恢复 healthy
+link_health_topic: /group_a/uav_link_health  # 链路健康发布话题（str）
+link_health_pre_task_wait_s: 10.0     # 任务前链路健康等待（s，>0）

@@ -3,19 +3,29 @@
 # 路径类（map_file/formation_offsets_file）为 launch deployment override，不放 YAML。
 # link_* 默认即生产确认值：link_suspect_after_s=10.0、link_lost_after_s=15.0、
 # link_healthy_window_s=3.0（与 link_safety_defaults.yaml 一致）。
+# 语义（单位见注释）。
 
-action_name: /group_a/execute_task
-emergency_hold_service: /group_a/emergency_hold
-confirm_wait_s: 1.0
-confirm_retries: 2
-confirm_retry_interval_s: 0.2
-confirm_deadline_s: 4.0
-hold_batch_size: 4
-hold_retry_count: 2
-hold_retry_interval_s: 0.5
-require_calibration_ready: true
-link_suspect_after_s: 10.0
-link_lost_after_s: 15.0
-link_healthy_window_s: 3.0
-link_health_topic: /group_a/uav_link_health
-link_health_pre_task_wait_s: 10.0
+# —— Action/Service 名称 ——
+action_name: /group_a/execute_task    # Action 服务器名（str）：backend 接收 ExecuteGroupTask 的入口
+emergency_hold_service: /group_a/emergency_hold  # 紧急 HOLD service 名（str）：链路丢失/失败时调用
+
+# —— 任务下发前各机确认 ——
+confirm_wait_s: 1.0                   # 确认等待（s，>0）：下发任务后等待各机就绪确认的首段时长
+confirm_retries: 2                    # 确认重试次数（int，>=0）：确认未齐时的重试上限
+confirm_retry_interval_s: 0.2         # 确认重试间隔（s，>0）：重试间的等待
+confirm_deadline_s: 4.0               # 确认截止（s，>0）：整个确认流程的最长时长
+
+# —— 安全 HOLD 批量下发（_safe_hold，降低 bridge 并发负载）——
+hold_batch_size: 4                    # 每批 HOLD 下发的 UAV 数（int，>0）：分批避免 bridge 并发超时
+hold_retry_count: 2                   # HOLD 重试次数（int，>=0）：瞬时超时的重试上限
+hold_retry_interval_s: 0.5            # HOLD 重试间隔（s，>0）：重试间等待
+
+# —— 标定门禁 ——
+require_calibration_ready: true       # 是否要求标定就绪（bool）：true 时 calibration_ready 未达拒单
+
+# —— 链路健康判定 ——
+link_suspect_after_s: 10.0            # 链路怀疑阈值（s，>0）：超过该时长无状态更新判 suspect
+link_lost_after_s: 15.0               # 链路丢失阈值（s，>0）：超过该时长判 lost
+link_healthy_window_s: 3.0            # 健康恢复窗口（s，>0）：持续新鲜达该时长恢复 healthy
+link_health_topic: /group_a/uav_link_health  # 链路健康发布话题（str）：UavLinkHealth latch
+link_health_pre_task_wait_s: 10.0     # 任务前链路健康等待（s，>0）：任务开始前的健康确认窗口

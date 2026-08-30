@@ -41,9 +41,9 @@ catkin_swarm6-2/
 │   ├── tcp_to_ros/             GCS_A 地面站主包（本文档所在包）
 │   ├── swarm_uav_interfaces/   共享 ROS msg/srv 契约（所有机必须同版本）
 │   ├── swarm_topology_bridge/  通用跨 Master 桥（Topic + Service 代理）
-│   ├── swarm_uav_executor/     机载任务执行器 + 安全 HOLD
+│   ├── swarm_uav_executor/     机载任务执行器 + 安全 HOLD + 机载组合 launch/GPS bias/起飞脚本
 │   ├── ego_planner_driver/     C++ ego-swarm 风格轨迹驱动（B-spline + L-BFGS + 互惠避碰）
-│   └── safe_valley_exp/        应用示例 + 15 机仿真 launch + 起飞脚本
+│   └── swarm_simulation/       Gazebo/PX4 SITL 仿真环境层（4/15 机 launch，26083018 拆包新增）
 ├── references/             只读参考资料（runtime 行为树、docs 方案、ego-planner-swarm 原版）
 ├── verification/           工程验证脚本（不属于任何 git 仓库；ego_smoke、acceptance、plot 脚本）
 ├── .ros_home/              统一 ROS 日志目录（避免散落 ~/.ros）
@@ -69,7 +69,7 @@ catkin_swarm6-2/
 | PREPARE/START/ABORT | ✅ | backend 整批并发确认，内部两阶段，runtime `timeout_s` 作整批绝对期限 |
 | 分层动作 | ✅ | planner TAKEOFF 软起飞至 5m 后 HOLD；任务 MOVE_TO 再进 15m 层→水平 EGO→目标 z；FOLLOW_ROUTE 12m；FAULT_EXIT 8m |
 | 固定编队 | ✅ | coverage-1 = A01-A12（3×4），coverage-2 = A01-A06+A13-A15（3×3）；集合不匹配拒绝 |
-| 起飞准备 | ✅ | 标定完成后，外部 `offboard_takeoff_15.py`：HOLD（失败回退 AUTO.LOITER）→ arm → OFFBOARD；planner TAKEOFF 软起飞 5m → HOLD；随后 executor PREPARE 只检查 armed/OFFBOARD/origin，GCS START 只启动已登记任务；15/15 成功 |
+| 起飞准备 | ✅ | 标定完成后，外部 `offboard_takeoff_15_sitl.py`：HOLD（失败回退 AUTO.LOITER）→ arm → OFFBOARD；planner TAKEOFF 软起飞 5m → HOLD；随后 executor PREPARE 只检查 armed/OFFBOARD/origin，GCS START 只启动已登记任务；15/15 成功 |
 | link_health + safe_hold | ✅ | 替代已删除的 lease 机制：节点丢失 → backend 判定 LOST → 全悬停 → 手动接管 |
 | 飞行安全租约（lease） | ❌ 已删除 | 时延敏感（renew 0.9s）+ 锁存难恢复，仿真与自组网实机都不可用；决策见 plans/README.md |
 
@@ -102,12 +102,12 @@ src/tcp_to_ros/test_records/test_record_26082300.md   （方案 B prepare）
 
 ```text
 1. 构建：catkin build（6 包全过）
-2. 启动仿真层：multi_uav_ego_15sim.launch（11300/11345，15 架 iris）
-3. 启动 15 机载层：startup_offboard_ego.sh 1..15（11311..11325）
+2. 启动仿真层：`roslaunch swarm_simulation multi_uav_ego_15sim.launch`（11300/11345，15 架 iris）
+3. 启动 15 机载层：`bash src/swarm_uav_executor/scripts/startup_offboard_ego.sh 1..15`（11311..11325）
 4. GCS_A：topology_group_a_sim.launch uav_name:=GCS_A（11310）
 5. backend+标定：gcs_a_backend.launch（须 disarm；A01-A06 计算原点/航向，A01-A15 回读 15/15 ready）
 6. TCP server：tcp_server_node.py（39001）
-7. 外部起飞准备：offboard_takeoff_15.py 1..15（HOLD/AUTO.LOITER → arm → OFFBOARD → planner TAKEOFF 软起飞 5m → HOLD）
+7. 外部起飞准备：offboard_takeoff_15_sitl.py 1..15（HOLD/AUTO.LOITER → arm → OFFBOARD → planner TAKEOFF 软起飞 5m → HOLD）
 8. 批次：task_test.py --backend tcp --group A --task <TASK> --timeout-s <T>；executor PREPARE 只检查 armed/OFFBOARD/origin，全部 PREPARED 后 GCS START 启动任务
 9. 清理：逆序停止，勿用宽泛 killall/pkill
 ```
@@ -146,8 +146,8 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 
 | 文件 | 硬编码内容 | 说明 |
 |---|---|---|
-| `src/safe_valley_exp/startup_offboard_ego.sh` | 第 16-21 行：`ROS_HOME`/`ROS_LOG_DIR`/`WS`/`PX4_ROOT` | 机载层批量启动脚本；换环境必改 |
-| `src/safe_valley_exp/scripts/offboard_takeoff_15.py` | `ROS_SETUP`/`WS` 常量 | 起飞脚本；换环境必改 |
+| `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 第 16-21 行：`ROS_HOME`/`ROS_LOG_DIR`/`WS`/`PX4_ROOT` | 机载层批量启动脚本；换环境必改 |
+| `src/swarm_uav_executor/scripts/offboard_takeoff_15_sitl.py` | `ROS_SETUP`/`WS` 常量 | 起飞脚本；换环境必改 |
 | 本文档内命令 | 每节 `cd /home/ub20tg/catkin_swarm6-2`、`export ...=/home/ub20tg/...` | 复制命令前先替换 |
 | `references/runtime/` 脚本（若本机运行 runtime） | 运行路径 | 可选，runtime 用相对路径为主 |
 
@@ -191,10 +191,12 @@ rosrun tcp_to_ros check_tcp_port.py --port 39001
 ```text
 GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 每台 UAVn: swarm_uav_executor + swarm_topology_bridge + swarm_uav_interfaces
-仿真层:    safe_valley_exp（launch + 起飞脚本）+ PX4/Gazebo
+仿真层:    swarm_simulation（Gazebo/PX4 SITL launch）+ PX4/Gazebo
 ```
 
-`safe_valley_exp` 不属于 GCS_A 必需部署；机载执行能力由 `swarm_uav_executor` + `ego_planner_driver` 提供。
+`swarm_simulation` 仅含仿真环境；机载执行能力由 `swarm_uav_executor`（含
+`uav_offboard_ego.launch` / `startup_offboard_ego.sh` / `offboard_takeoff_15_sitl.py` /
+GPS bias）与 `ego_planner_driver` 提供。原 `safe_valley_exp` 已于 26083018 拆包删除。
 
 ---
 
@@ -206,7 +208,7 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
 - **C++ 主状态 = HOLD**：空闲悬停用 `steady_target_` 冻结位姿，不再每秒刷新（避免漂移）。
   `POSE_STALE` 已删除（26082621），HOLD 锁存进入时位姿，不随 pose 漂移。
 - **分层轨迹**：非 follower 全部走 ego 带时轨迹；follower 用 PI 位置 + 固定槽位偏置；垂直段冻结 x/y/yaw。
-- **起飞与任务职责**：标定 → 外部 `offboard_takeoff_15.py` 切 HOLD（拒绝时回退 AUTO.LOITER）→ arm → OFFBOARD →
+- **起飞与任务职责**：标定 → 外部 `offboard_takeoff_15_sitl.py` 切 HOLD（拒绝时回退 AUTO.LOITER）→ arm → OFFBOARD →
   planner TAKEOFF 软起飞至 5m → HOLD；之后 executor PREPARE 只检查 armed/OFFBOARD/origin，GCS START
   只释放已登记任务。executor 不拥有 arm/OFFBOARD，START 不触发起飞，5m TAKEOFF 也不是 MOVE_TO 子阶段。
 - **统一 3D 距离规范**：planner hard-clearance 按预测轨迹同一时刻的 3D 中心距 `<1.0m` 拒绝；executor
@@ -239,15 +241,17 @@ GCS_A:     tcp_to_ros + swarm_topology_bridge + swarm_uav_interfaces
   电脑（executor + bridge + interfaces），MAVROS/PX4 在本机还是远端；形成实机 IP/主机名映射，
   并复核冻结 `uav_identity_map.yaml`（当前仅仿真规则 A0n→UAVn→192.168.5.x，实机必改）。
 
-### 7.d safe_valley_exp 需要拆解
+### 7.d safe_valley_exp 拆包（✅ 已完成 26083018）
 
-- 当前只借用了它的个别 launch（`uav_offboard_ego.launch`、`multi_uav_ego_15sim.launch`）和配置，
-  其核心 flock 算法并未在工程中真正应用。需要把真正使用的 launch/配置/起飞脚本拆解到对应
-  功能包（或新建仿真包），避免把示例包当成依赖、误导部署。
+- 已按 implementation_plan_26083018 §4 拆包：仿真 launch 迁入新包 `swarm_simulation`；
+  机载组合（`uav_offboard_ego.launch`/`startup_offboard_ego.sh`/`gps_bias_node.py`/
+  `gps_bias_defaults.yaml`）与 SITL takeoff 脚本（`offboard_takeoff_15_sitl.py`）迁入
+  `swarm_uav_executor`；残留辅助（wait_mavros/submode_publisher/rosbag_record）删除；
+  `safe_valley_exp` 包整体删除。源码不再依赖该历史包。
 
 ### 7.e takeoff 脚本需按实机重构
 
-- 当前 `offboard_takeoff_15.py` 面向 15 机本地 SITL（固定端口 11311-11325、本机执行），
+- 当前 `offboard_takeoff_15_sitl.py` 面向 15 机本地 SITL（固定端口 11311-11325、本机执行），
   实机每台机载电脑独立 IP/端口，无法直接使用。
 - 重构方向：参数化 UAV 列表与 ROS Master URI，同时保持当前职责边界：外部脚本只负责本机
   HOLD/AUTO.LOITER → arm → OFFBOARD，planner 负责 TAKEOFF 软起飞 5m → HOLD；executor PREPARE

@@ -280,7 +280,7 @@ A01 至 A15；15 架全部完成一次性回读确认后，GCS_A 才进入标定
 
 ## 按需起飞
 
-指完成标定后，由外部起飞脚本 `offboard_takeoff_15.py` 对本机执行 HOLD（拒绝时回退 AUTO.LOITER）
+指完成标定后，由外部起飞脚本 `offboard_takeoff_15_sitl.py` 对本机执行 HOLD（拒绝时回退 AUTO.LOITER）
 → arm → OFFBOARD；随后 `ego_planner_driver` 的 `TAKEOFF` 状态软起飞至
 `takeoff_height_m=5.0` 并锁存 HOLD。完成上述流程后，executor PREPARE 只检查 armed、OFFBOARD、
 原点确认，GCS START 只启动已经登记的任务。START 不触发按需起飞，5m 也不是
@@ -288,7 +288,7 @@ MOVE_TO 子阶段。
 
 ## arm 权限
 
-指对本机飞控执行 arm 与切换 OFFBOARD 的动作。当前只由外部起飞脚本（`offboard_takeoff_15.py`）
+指对本机飞控执行 arm 与切换 OFFBOARD 的动作。当前只由外部起飞脚本（`offboard_takeoff_15_sitl.py`）
 执行：先 HOLD（失败时 AUTO.LOITER），再 arm，最后 OFFBOARD。executor 不调用 arm/set_mode 服务，
 PREPARE 只检查状态；GCS START 不拥有 arm/OFFBOARD 或起飞权限。多机任务中脚本也仅操作对应本机飞控。
 
