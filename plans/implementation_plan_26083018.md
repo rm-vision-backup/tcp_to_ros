@@ -1,7 +1,6 @@
 # 参数配置规范化与 `safe_valley_exp` 拆包实施计划
 
 **计划日期：** 2026-08-30 18:00（文件生成时间，24 小时制）  
-**状态：** 计划已建立，未实施  
 **来源：** `.tmp/notes/code_review_260829_parameter_standardization.md`
 
 ## 1. 实施目标
