@@ -29,3 +29,22 @@ link_lost_after_s: 15.0               # 链路丢失阈值（s，>0）：超过�
 link_healthy_window_s: 3.0            # 健康恢复窗口（s，>0）：持续新鲜达该时长恢复 healthy
 link_health_topic: /group_a/uav_link_health  # 链路健康发布话题（str）：UavLinkHealth latch
 link_health_pre_task_wait_s: 10.0     # 任务前链路健康等待（s，>0）：任务开始前的健康确认窗口
+
+# —— GCS 机间时间偏移排程（implementation_plan_26090106 §7）——
+# 语义：对 MOVE_TO / FAULT_EXIT 用 bridge 位姿（水平 xy）+ 任务目标（已转 local ENU）
+# 计算两两水平运动安全区间，按 UAV1 参考做 t_off 方差优化，再按 t_off 调度 START。
+# schedule_status 与预测距离只写 tcp_to_ros 日志，不进 runtime/机载消息。
+move_to_schedule_enabled: true        # 是否对 MOVE_TO 启用 t_off 排程（bool）
+fault_exit_schedule_enabled: true     # 是否对 FAULT_EXIT 启用 t_off 排程（bool）
+horizontal_speed_mps: 0.7             # 排程预测水平速度（m/s，>0）：计划 §4.2 固定速度
+schedule_geometric_distance_m: 1.0    # 排程几何安全距离（m，>0）：与 3D 距离门禁 1.0m 一致（计划 §4.3）
+schedule_safety_margin_m: 0.5         # 排程安全裕度（m，>=0）：吸收定位/通信/启动/跟踪误差，
+                                      #   实测终点偏差 0.2-0.7m（test_record_26082400），取 0.5m 裕度
+schedule_pose_timeout_s: 1.0          # 位姿新鲜度阈值（s，>0）：超过该时长 pose 判过期（计划 §5.2）
+schedule_time_epsilon_s: 1e-6         # 排程数值容差（s，>0）：区间边界/距离比较的浮点容差
+schedule_max_start_delay_s: 30.0      # 最大启动延迟（s，>0）：限制 max(tau_i')，超限排程前置失败（计划 §5.4）
+schedule_max_interval_combinations: 2000  # 区间组合搜索上限（int，>0）：达到上限停止，标记非全局最优
+schedule_max_compute_time_s: 5.0      # 排程计算时间上限（s，>0）：达到上限停止
+start_service_budget_s: 1.5           # START service 等待/重试预算（s，>0）：单次等待+重试+重试间隔
+                                      #   （覆盖 confirm_wait_s=1.0 与 confirm_retry_interval_s=0.2）
+start_dispatch_jitter_margin_s: 0.5   # START 调度抖动裕度（s，>0）：调度线程唤醒、本地排队与正常通信抖动

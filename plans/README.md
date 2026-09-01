@@ -91,7 +91,7 @@ GCS_A 必须：
 | `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **已实施（2026-08-28，代码+单测+PSI；全量 295 tests 0 failure；15-UAV prepare 验收进行中）** |
 | `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
-| `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **计划已建立，未实施** |
+| `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；FAULT_EXIT 与五次 prepare 仿真验收未执行）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -266,6 +266,7 @@ GCS_A 必须：
 | `test_records/test_record_26082602.md` / `26082621.md` / `26082700.md` | 26082602 / 26082621 / prepare 15 机全 active 与软着陆修复记录 |
 | `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁（本记录） |
 | `test_records/test_record_26082916.md` | 参数配置整理与规范化：canonical YAML、接线、校验、flock 清理与回归记录 |
+| `test_records/test_record_26090106.md` | t_off 启动时序协调：排程器单元 + GCS 集成测试记录（仿真验收未执行） |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |
 
@@ -291,3 +292,31 @@ GCS_A 必须：
 - **契约无回归**：1.0m 三维门禁、Safety active、planner/relay 30Hz、candidate timeout 0.2s、
   TimedTrajectory 0.1s、bridge/GPS/intent/PositionTarget 语义。
 
+
+
+## 状态-26090106：MOVE_TO/FAULT_EXIT 基于 t_off 的 GCS 机间避碰（2026-09-01 已实施）
+
+- **排程器**（`scripts/tcp_to_ros/time_offset_scheduler.py`，纯计算无 rospy）：bridge 水平位姿起点 +
+  任务目标（经 `task_point_to_local_enu`）→ 两两安全 delta 区间（解析区间边界分析，非网格）→
+  UAV1 参考的 t_off 方差优化（差分约束可行点 + 活动集凸 QP）→ 负 tau 整体平移为非负发送时间。
+  搜索上限：`schedule_max_start_delay_s` / `schedule_max_interval_combinations` /
+  `schedule_max_compute_time_s`。schedule_status（SCHEDULE_OK / GEOMETRY_UNSUITABLE /
+  PAIR_SAFE_SET_EMPTY / GLOBAL_SCHEDULE_INFEASIBLE / SCHEDULE_LIMIT_REACHED）只写日志。
+- **backend**（`gcs_a_backend_node.py`）：新增 `/<exec>/mavros/local_position/pose` 订阅与
+  新鲜度缓存（`schedule_pose_timeout_s`）；MOVE_TO/FAULT_EXIT 在 PREPARE 前做排程，失败
+  不发送任何任务并返回 FAILED + fail id（SCHEDULE_POSE_UNAVAILABLE 等 schedule-specific
+  error code）；START 按 t_off 独立 worker 调度，t0 在全部 PREPARE accepted 后重建，
+  总截止 = `max(tau') + start_service_budget_s + start_dispatch_jitter_margin_s`；
+  `schedule_max_start_delay_s` 只限制 max(tau')，任务 timeout 不足前置拒绝
+  （SCHEDULE_TIMEOUT_INSUFFICIENT，不做运行中误超时）。
+- **参数**（`backend_defaults.yaml` §7 新增 12 项）：move_to/fault_exit 开关、水平速度 0.7、
+  几何距离 1.0（与 3D 门禁一致）、安全裕度 0.5（终点偏差 0.2-0.7m 标定，test_record_26082400）、
+  pose 超时 1.0、数值容差 1e-6、最大延迟 30、组合上限 2000、计算上限 5s、START 预算 1.5s、
+  抖动裕度 0.5s。参数 fail-fast 校验，非 finite/非正即启动失败。
+- **不修改**：interfaces msg/srv、executor t_off 接口、ego planner、references/runtime、
+  swarm_simulation spawn（计划 §8.4 清单）。
+- **测试**：`test/test_time_offset_scheduler.py` 20/20 通过（13 单元 + 7 集成）。回归：gcs_a_aggregation、
+  parameter_wiring、calibration、fixed_formations、link_health、tcp_disconnect_safety、tcp_port_policy 均 OK；
+  duplicate_command/hold_interrupt/wrong_group 需 39001 TCP server 环境，无环境未跑。
+- **未验收**：FAULT_EXIT 排程行为（计划 §8 本轮不测）；§8.4 五次干净重启 prepare 仿真验收
+  （需 15 机 Gazebo SITL 完整环境，本次未执行）。不得视为已验证。

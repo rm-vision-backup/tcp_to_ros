@@ -16,6 +16,7 @@ Frozen decisions implemented here:
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from typing import Dict, List, Optional
 
 import actionlib
 import rospy
+from geometry_msgs.msg import PoseStamped
 from mavros_msgs.msg import State as MavrosState
 from std_msgs.msg import Bool, Float64
 
@@ -48,6 +50,17 @@ from swarm_uav_interfaces.srv import (
 from tcp_to_ros.identity import IdentityMap
 from tcp_to_ros.link_health import LOST, UavLinkMonitor
 from tcp_to_ros.calibration import task_point_to_local_enu, task_vector_to_enu
+from tcp_to_ros.time_offset_scheduler import (
+    GEOMETRY_UNSUITABLE,
+    GLOBAL_SCHEDULE_INFEASIBLE,
+    PAIR_SAFE_SET_EMPTY,
+    SCHEDULE_LIMIT_REACHED,
+    SCHEDULE_OK,
+    ScheduleParams,
+    ScheduleResult,
+    UavSegment,
+    compute_schedule,
+)
 
 PROTOCOL_VERSION = "1.0"
 
@@ -60,6 +73,7 @@ TASK_CONTROL_SERVICE_SUFFIX = "uav_task_control"
 HOLD_SERVICE_SUFFIX = "uav_hold"
 STATE_TOPIC_SUFFIX = "uav_task_state"
 MAVROS_STATE_SUFFIX = "mavros/state"
+LOCAL_POSE_SUFFIX = "mavros/local_position/pose"
 
 # Confirm plan constants
 DEFAULT_CONFIRM_WAIT_S = 1.0
@@ -71,6 +85,29 @@ DEFAULT_CONFIRM_DEADLINE_S = 4.0
 DEFAULT_HOLD_BATCH_SIZE = 4
 DEFAULT_HOLD_RETRY_COUNT = 2
 DEFAULT_HOLD_RETRY_INTERVAL_S = 0.5
+
+# Time-offset scheduling defaults. Canonical values live in backend_defaults.yaml
+# (implementation_plan_26090106 §7); these fallbacks mirror the YAML production
+# values so a missing rosparam cannot silently drift (26082916 §7 convention).
+DEFAULT_HORIZONTAL_SPEED_MPS = 0.7
+DEFAULT_SCHEDULE_GEOMETRIC_DISTANCE_M = 1.0
+DEFAULT_SCHEDULE_SAFETY_MARGIN_M = 0.5
+DEFAULT_SCHEDULE_POSE_TIMEOUT_S = 1.0
+DEFAULT_SCHEDULE_TIME_EPSILON_S = 1e-6
+DEFAULT_SCHEDULE_MAX_START_DELAY_S = 30.0
+DEFAULT_SCHEDULE_MAX_INTERVAL_COMBINATIONS = 2000
+DEFAULT_SCHEDULE_MAX_COMPUTE_TIME_S = 5.0
+DEFAULT_START_SERVICE_BUDGET_S = 1.5
+DEFAULT_START_DISPATCH_JITTER_MARGIN_S = 0.5
+
+# Schedule-specific failure codes returned to runtime (plan 6.2 allows new
+# schedule-specific error codes). schedule_status is log-only (plan 6.1).
+SCHEDULE_POSE_UNAVAILABLE = "SCHEDULE_POSE_UNAVAILABLE"
+SCHEDULE_GEOMETRY_UNSUITABLE = "SCHEDULE_GEOMETRY_UNSUITABLE"
+SCHEDULE_PAIR_SAFE_SET_EMPTY = "SCHEDULE_PAIR_SAFE_SET_EMPTY"
+SCHEDULE_INFEASIBLE = "SCHEDULE_INFEASIBLE"
+SCHEDULE_LIMIT_REACHED = "SCHEDULE_LIMIT_REACHED"
+SCHEDULE_TIMEOUT_INSUFFICIENT = "SCHEDULE_TIMEOUT_INSUFFICIENT"
 
 STATE_ACCEPTED = "ACCEPTED"
 STATE_COMPLETED = "COMPLETED"
@@ -125,6 +162,10 @@ class GroupState:
     hold_rejected: List[str] = field(default_factory=list)
     error_code: str = ""
     message: str = ""
+    # Time-offset scheduling results (plan 5.3/5.4). schedule_tau is the shifted
+    # non-negative tau_i' keyed by task-layer uav_id; schedule_status is log-only.
+    schedule_tau: Dict[str, float] = field(default_factory=dict)
+    schedule_status: str = ""
 
     @property
     def key(self) -> str:
@@ -167,6 +208,49 @@ class GcsABackendNode:
         self.hold_retry_interval_s = float(
             rospy.get_param("~hold_retry_interval_s", DEFAULT_HOLD_RETRY_INTERVAL_S)
         )
+
+        # Time-offset scheduling parameters (implementation_plan_26090106 §7).
+        # Canonical values come from backend_defaults.yaml via the launch
+        # rosparam load; the DEFAULT_* fallbacks mirror the YAML production
+        # values (26082916 §7 convention) and validate() fails fast on invalid
+        # YAML instead of silently running with a broken schedule.
+        self.move_to_schedule_enabled = bool(
+            rospy.get_param("~move_to_schedule_enabled", True))
+        self.fault_exit_schedule_enabled = bool(
+            rospy.get_param("~fault_exit_schedule_enabled", True))
+        self.schedule_params = ScheduleParams(
+            horizontal_speed_mps=float(rospy.get_param(
+                "~horizontal_speed_mps", DEFAULT_HORIZONTAL_SPEED_MPS)),
+            geometric_distance_m=float(rospy.get_param(
+                "~schedule_geometric_distance_m", DEFAULT_SCHEDULE_GEOMETRIC_DISTANCE_M)),
+            safety_margin_m=float(rospy.get_param(
+                "~schedule_safety_margin_m", DEFAULT_SCHEDULE_SAFETY_MARGIN_M)),
+            time_epsilon_s=float(rospy.get_param(
+                "~schedule_time_epsilon_s", DEFAULT_SCHEDULE_TIME_EPSILON_S)),
+            max_start_delay_s=float(rospy.get_param(
+                "~schedule_max_start_delay_s", DEFAULT_SCHEDULE_MAX_START_DELAY_S)),
+            max_interval_combinations=int(rospy.get_param(
+                "~schedule_max_interval_combinations",
+                DEFAULT_SCHEDULE_MAX_INTERVAL_COMBINATIONS)),
+            max_compute_time_s=float(rospy.get_param(
+                "~schedule_max_compute_time_s", DEFAULT_SCHEDULE_MAX_COMPUTE_TIME_S)),
+        )
+        self.schedule_params.validate()
+        self.schedule_pose_timeout_s = float(rospy.get_param(
+            "~schedule_pose_timeout_s", DEFAULT_SCHEDULE_POSE_TIMEOUT_S))
+        self.start_service_budget_s = float(rospy.get_param(
+            "~start_service_budget_s", DEFAULT_START_SERVICE_BUDGET_S))
+        self.start_dispatch_jitter_margin_s = float(rospy.get_param(
+            "~start_dispatch_jitter_margin_s", DEFAULT_START_DISPATCH_JITTER_MARGIN_S))
+        for name, value in (("schedule_pose_timeout_s", self.schedule_pose_timeout_s),
+                            ("start_service_budget_s", self.start_service_budget_s),
+                            ("start_dispatch_jitter_margin_s",
+                             self.start_dispatch_jitter_margin_s)):
+            if not (math.isfinite(value) and value > 0.0):
+                raise ValueError("%s must be a positive finite number" % name)
+        # Bridge-forwarded current pose cache: exec_target -> {x, y, recv_monotonic}.
+        self._pose_cache: Dict[str, dict] = {}
+        self._pose_lock = threading.Lock()
 
         self.identity_map = IdentityMap.load(self.identity_map_path)
         (self.formation_offsets, self.formation_participants,
@@ -239,6 +323,25 @@ class GcsABackendNode:
             rospy.Subscriber(mavros_topic, MavrosState, self._on_mavros_state,
                              callback_args=(ident.uav_id, ident.exec_target), queue_size=10)
             rospy.loginfo("GCS_A subscribed to %s", mavros_topic)
+            pose_topic = "/{}/{}".format(ident.exec_target, LOCAL_POSE_SUFFIX)
+            rospy.Subscriber(pose_topic, PoseStamped, self._on_local_pose,
+                             callback_args=ident.exec_target, queue_size=10)
+            rospy.loginfo("GCS_A subscribed to %s", pose_topic)
+
+    def _on_local_pose(self, msg: PoseStamped, exec_target: str) -> None:
+        """Cache the latest bridge-forwarded local pose for scheduling (plan 5.2).
+
+        Only the horizontal (x, y) is kept; the scheduler never reads z. The
+        received monotonic time drives freshness checking against
+        schedule_pose_timeout_s.
+        """
+        with self._pose_lock:
+            self._pose_cache[exec_target] = {
+                "x": float(msg.pose.position.x),
+                "y": float(msg.pose.position.y),
+                "recv_monotonic": time.monotonic(),
+            }
+
 
     @staticmethod
     def _load_formation_offsets(path: str):
@@ -456,7 +559,225 @@ class GcsABackendNode:
                 if self._active is state:
                     self._active = None
 
+    def _schedule_applies(self, command: str) -> bool:
+        """True when this batch must run the t_off scheduler (plan 5.3)."""
+        return (
+            (str(command or "") == "MOVE_TO" and self.move_to_schedule_enabled)
+            or (str(command or "") == "FAULT_EXIT" and self.fault_exit_schedule_enabled)
+        )
+
+    def _pose_snapshot(self, exec_targets: List[str]):
+        """Consistent horizontal pose snapshot with freshness gating (plan 5.2)."""
+        now = time.monotonic()
+        snapshot: Dict[str, tuple] = {}
+        missing: List[str] = []
+        with self._pose_lock:
+            for exec_target in exec_targets:
+                entry = self._pose_cache.get(exec_target)
+                age = None if entry is None else now - entry["recv_monotonic"]
+                if entry is None or age > self.schedule_pose_timeout_s:
+                    missing.append(exec_target)
+                else:
+                    snapshot[exec_target] = (entry["x"], entry["y"])
+        if missing:
+            rospy.logwarn("GCS_A schedule pose unavailable/stale for %s", ",".join(missing))
+        return snapshot, missing
+
+    def _build_schedule_segments(self, goal, state: GroupState):
+        """Build scheduler input: bridge pose start + task goal translated to local
+        ENU (plan 4.1/4.2). MOVE_TO uses target_pose, FAULT_EXIT the final
+        waypoint. Returns (segments, fail_ids); None segments means pre-check
+        failed (missing pose or assignment)."""
+        exec_targets = [state.exec_by_uav[uav] for uav in state.uav_ids]
+        snapshot, missing = self._pose_snapshot(exec_targets)
+        if missing:
+            fail_ids = [uav for uav in state.uav_ids
+                        if state.exec_by_uav[uav] in missing]
+            return None, fail_ids
+        now = time.monotonic()
+        ages = {}
+        with self._pose_lock:
+            for exec_target in exec_targets:
+                ages[exec_target] = now - self._pose_cache[exec_target]["recv_monotonic"]
+        segments = []
+        for uav_id in state.uav_ids:
+            exec_target = state.exec_by_uav[uav_id]
+            x0, y0 = snapshot[exec_target]
+            assignment = None
+            for item in goal.assignments:
+                if item.uav_id == uav_id:
+                    assignment = item
+                    break
+            if assignment is None:
+                return None, [uav_id]
+            if str(state.command) == "MOVE_TO":
+                goal_pose = assignment.target_pose
+            else:  # FAULT_EXIT: final exit waypoint
+                if not assignment.waypoints:
+                    return None, [uav_id]
+                goal_pose = assignment.waypoints[-1]
+            gx, gy, _gz = task_point_to_local_enu(
+                goal_pose.x, goal_pose.y, goal_pose.z,
+                self.reference_heading, self.mission_anchor)
+            segments.append(UavSegment(
+                uav_id=uav_id, start_xy=(x0, y0), goal_xy=(gx, gy)))
+            rospy.loginfo(
+                "GCS_A schedule input %s start=(%.3f, %.3f) goal=(%.3f, %.3f) pose_age=%.3fs",
+                uav_id, x0, y0, gx, gy, ages[exec_target])
+        return segments, []
+
+    def _compute_and_store_schedule(self, goal, state: GroupState) -> bool:
+        """Run the pre-PREPARE schedule (plan 5.3 step 5/6). On failure it does not
+        call PREPARE and returns a FAILED result with the related fail ids."""
+        segments, fail_ids = self._build_schedule_segments(goal, state)
+        if segments is None:
+            result = ScheduleResult(
+                success=False, schedule_status=SCHEDULE_OK, fail_ids=fail_ids,
+                failure_reason="pose snapshot unavailable or stale")
+            self._fail_schedule(goal, state, result, SCHEDULE_POSE_UNAVAILABLE)
+            return False
+        schedule = compute_schedule(segments, self.schedule_params)
+        if not schedule.success:
+            code = {
+                GEOMETRY_UNSUITABLE: SCHEDULE_GEOMETRY_UNSUITABLE,
+                PAIR_SAFE_SET_EMPTY: SCHEDULE_PAIR_SAFE_SET_EMPTY,
+                GLOBAL_SCHEDULE_INFEASIBLE: SCHEDULE_INFEASIBLE,
+                SCHEDULE_LIMIT_REACHED: SCHEDULE_LIMIT_REACHED,
+            }[schedule.schedule_status]
+            self._fail_schedule(goal, state, schedule, code)
+            return False
+        # plan 5.4: task timeout_s must cover PREPARE-after wait + execution.
+        needed = (schedule.max_tau_s() + schedule.max_horizontal_time_s
+                  + self.start_service_budget_s
+                  + self.start_dispatch_jitter_margin_s)
+        if needed > float(goal.timeout_s):
+            self._log_schedule(goal, state, schedule)
+            rospy.logwarn(
+                "GCS_A schedule timeout insufficient: needed=%.3f timeout=%.3f",
+                needed, float(goal.timeout_s))
+            result = self._build_result(
+                final_status="FAILED", failed_uavs=list(state.uav_ids),
+                error_code=SCHEDULE_TIMEOUT_INSUFFICIENT,
+                message=("task timeout_s %.3f insufficient for scheduled start"
+                         % float(goal.timeout_s)))
+            self._publish_feedback(state, phase="FAILED", detail=result.message)
+            self.server.set_aborted(result, text=result.message)
+            return False
+        with state.lock:
+            state.schedule_tau = dict(zip(state.uav_ids, schedule.tau))
+            state.schedule_status = schedule.schedule_status
+        self._log_schedule(goal, state, schedule)
+        return True
+
+    def _fail_schedule(self, goal, state: GroupState, schedule, error_code: str) -> None:
+        """Plan 6.2: pre-schedule failure returns FAILED + fail ids; no task is
+        sent to any UAV."""
+        self._log_schedule(goal, state, schedule)
+        failed_uavs = schedule.fail_ids or list(state.uav_ids)
+        result = self._build_result(
+            final_status="FAILED", failed_uavs=failed_uavs, error_code=error_code,
+            message=schedule.failure_reason or "schedule pre-check failed")
+        self._publish_feedback(state, phase="FAILED", detail=result.message)
+        self.server.set_aborted(result, text=result.message)
+
+    def _log_schedule(self, goal, state: GroupState, schedule, status: Optional[str] = None) -> None:
+        """schedule_status / tau / pair diagnostics only into tcp_to_ros logs
+        (plan 6.1), never into runtime or onboard messages."""
+        log_status = status or schedule.schedule_status
+        rospy.loginfo(
+            "GCS_A schedule mission=%s command_id=%s command=%s status=%s",
+            state.mission_id, state.command_id, state.command, log_status)
+        if schedule.fail_ids:
+            rospy.logwarn("GCS_A schedule fail_ids=%s reason=%s",
+                          ",".join(schedule.fail_ids), schedule.failure_reason)
+        if schedule.tau:
+            tau_s = ", ".join("%s=%.3f" % (uav, t)
+                               for uav, t in zip(state.uav_ids, schedule.tau))
+            rospy.loginfo(
+                "GCS_A schedule tau {%s} variance=%.4f compute=%.3fs non_global=%s",
+                tau_s, schedule.variance, schedule.compute_time_s,
+                schedule.non_global_optimal)
+        for pair in schedule.pair_results:
+            dmin = pair.predicted_min_distance_m
+            rospy.loginfo(
+                "GCS_A schedule pair %s/%s safe_intervals=%d predicted_dmin=%s",
+                pair.uav_i, pair.uav_j, len(pair.safe_intervals),
+                "inf" if dmin is None else "%.3f" % dmin)
+
+    def _dispatch_start_scheduled(self, state: GroupState) -> List[SingleUavConfirm]:
+        """START fan-out scheduled by shifted tau_i' (plan 5.4).
+
+        t0 is rebuilt now, after every PREPARE returned accepted. Each UAV gets
+        an independent worker that waits until t0 + tau_i' and then calls the
+        existing UavTaskControl START within the start_service_budget_s budget;
+        the group deadline is max(tau_i') + budget + jitter margin.
+        """
+        t0 = time.monotonic()
+        max_tau = max(state.schedule_tau.values()) if state.schedule_tau else 0.0
+        group_deadline = (t0 + max_tau + self.start_service_budget_s
+                          + self.start_dispatch_jitter_margin_s)
+        results: Dict[str, SingleUavConfirm] = {
+            uav: SingleUavConfirm(uav, target)
+            for uav, target in state.exec_by_uav.items()
+        }
+
+        def worker(uav_id: str, exec_target: str) -> None:
+            target = t0 + state.schedule_tau.get(uav_id, 0.0)
+            while not rospy.is_shutdown() and time.monotonic() < target:
+                time.sleep(min(0.02, max(0.0, target - time.monotonic())))
+            plan_sent = time.monotonic()
+            rospy.loginfo(
+                "GCS_A START dispatch %s target=%.3f actual=%.3f deviation=%.3f",
+                uav_id, target, plan_sent, plan_sent - target)
+            request = UavTaskControlRequest()
+            request.protocol_version = PROTOCOL_VERSION
+            request.operation = "START"
+            request.mission_id = state.mission_id
+            request.command_id = state.command_id
+            request.uav_id = exec_target
+            request.exec_target = exec_target
+            request.reason = ""
+            deadline = plan_sent + self.start_service_budget_s
+            for attempt in range(self.confirm_retries + 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                proxy = rospy.ServiceProxy(
+                    "/{}/{}".format(exec_target, TASK_CONTROL_SERVICE_SUFFIX),
+                    UavTaskControl)
+                outcome = self._call_service_with_timeout(
+                    proxy, request, min(self.confirm_wait_s, remaining))
+                if outcome.exception is None:
+                    response = outcome.response
+                    results[uav_id].accepted = bool(response.accepted)
+                    results[uav_id].status = str(response.status or "")
+                    results[uav_id].error_code = str(response.error_code or "")
+                    results[uav_id].message = str(response.message or "")
+                    if response.accepted:
+                        with state.lock:
+                            if uav_id not in state.started_uavs:
+                                state.started_uavs.append(uav_id)
+                    return
+                results[uav_id].message = str(outcome.exception)
+                if attempt < self.confirm_retries:
+                    time.sleep(min(self.confirm_retry_interval_s,
+                                   max(0.0, deadline - time.monotonic())))
+            if results[uav_id].accepted is None and not results[uav_id].message:
+                results[uav_id].message = "START dispatch deadline expired"
+
+        threads = [threading.Thread(target=worker, args=item, daemon=True)
+                   for item in state.exec_by_uav.items()]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(max(0.0, group_deadline - time.monotonic()))
+        return [results[uav] for uav in state.uav_ids]
+
     def _run_goal(self, goal, state: GroupState) -> None:
+        if self._schedule_applies(state.command):
+            if not self._compute_and_store_schedule(goal, state):
+                return
+
         confirm_results = self._confirm_participants(goal, state)
 
         rejections = [item for item in confirm_results if item.accepted is False]
@@ -485,7 +806,10 @@ class GcsABackendNode:
             self.server.set_aborted(result, text=result.message)
             return
 
-        start_results = self._control_participants(state, "START")
+        if self._schedule_applies(state.command) and state.schedule_tau:
+            start_results = self._dispatch_start_scheduled(state)
+        else:
+            start_results = self._control_participants(state, "START")
         start_failures = [item for item in start_results if not item.accepted]
         if start_failures:
             self._control_participants(state, "ABORT", reason="group START failed")
