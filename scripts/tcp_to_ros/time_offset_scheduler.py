@@ -233,10 +233,10 @@ def _floyd_point(n: int, constraints: List[Tuple[int, int, float, float]]
 
     Difference constraints are solved with all-pairs shortest paths (Floyd-
     Warshall). A negative diagonal means a negative cycle -> infeasible. The
-    feasible point is tau_i = dist(0 -> i), i.e. the shortest path from the
-    fixed node 0, which satisfies every edge constraint without introducing a
-    fake "x_i <= 0" bound (a virtual-source edge would wrongly reject positive
-    offsets, plan 4.5 allows any sign).
+    feasible point is built per connected component: the component containing
+    node 0 is anchored at 0 and every other component is anchored at 0 too
+    (components are independent), then tau_i = dist(rep -> i) satisfies every
+    edge constraint inside the component. No fake "x_i <= 0" bound is added.
     """
     inf = math.inf
     dist = [[inf] * n for _ in range(n)]
@@ -261,7 +261,34 @@ def _floyd_point(n: int, constraints: List[Tuple[int, int, float, float]]
     for i in range(n):
         if dist[i][i] < -1e-9:
             return None, False
-    point = [dist[0][i] if dist[0][i] != inf else 0.0 for i in range(n)]
+
+    # Connected components: i and j share a component when they are mutually
+    # reachable. Node 0's component is anchored at tau_0 = 0.
+    comp = [-1] * n
+    comp_id = 0
+    for start in range(n):
+        if comp[start] != -1:
+            continue
+        comp[start] = comp_id
+        stack = [start]
+        while stack:
+            u = stack.pop()
+            for v in range(n):
+                if comp[v] == -1 and dist[u][v] != inf and dist[v][u] != inf:
+                    comp[v] = comp_id
+                    stack.append(v)
+        comp_id += 1
+    rep: Dict[int, int] = {}
+    for c in range(comp_id):
+        members = [i for i in range(n) if comp[i] == c]
+        rep[c] = 0 if 0 in members else min(members)
+    point = [0.0] * n
+    for i in range(n):
+        r = rep[comp[i]]
+        if r == i:
+            point[i] = 0.0
+        else:
+            point[i] = dist[r][i] if dist[r][i] != inf else 0.0
     point[0] = 0.0
     return point, True
 
@@ -599,12 +626,23 @@ def _search_tau(n: int, motions: List[_Motion], pairs: List[Tuple[int, int]],
                 intervals: Dict[Tuple[int, int], List[Tuple[float, float]]],
                 params: ScheduleParams, start_time: float
                 ) -> Tuple[Optional[List[float]], float, bool, int]:
-    """DFS over one interval per pair; prune with Floyd feasibility and return
-    the lowest-variance verified solution. `limited` is True when the search
-    hit the combination or compute-time cap."""
+    """DFS over interval choices for the conflicting pairs.
+
+    A pair whose safe set contains delta = 0 is permissive: the optimal
+    solution stays near zero anyway, so its intervals are not enumerated in the
+    DFS (the leaf still verifies every pair). Only the restrictive pairs are
+    searched, which keeps a 12-UAV batch tractable while every returned tau is
+    verified against every pair's safe set. The result may be non-global-
+    optimal and is marked so when a cap is hit.
+    """
     d = params.safe_distance_m
     eps = params.time_epsilon_s
-    order = sorted(pairs, key=lambda p: len(intervals[p]))
+    restrictive: List[Tuple[int, int]] = []
+    for (i, j) in pairs:
+        contains_zero = any(l - eps <= 0.0 <= r + eps for (l, r) in intervals[(i, j)])
+        if not contains_zero:
+            restrictive.append((i, j))
+    order = sorted(restrictive, key=lambda p: len(intervals[p]))
     best_tau: Optional[List[float]] = None
     best_var = math.inf
     limited = False
