@@ -91,7 +91,7 @@ GCS_A 必须：
 | `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **已实施（2026-08-28，代码+单测+PSI；全量 295 tests 0 failure；15-UAV prepare 验收进行中）** |
 | `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
-| `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；FAULT_EXIT 与五次 prepare 仿真验收未执行）** |
+| `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；prepare 五次干净重启验收 0/5，失败均为机载 intent/监督，见 test_record_26090106）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -318,5 +318,8 @@ GCS_A 必须：
 - **测试**：`test/test_time_offset_scheduler.py` 20/20 通过（13 单元 + 7 集成）。回归：gcs_a_aggregation、
   parameter_wiring、calibration、fixed_formations、link_health、tcp_disconnect_safety、tcp_port_policy 均 OK；
   duplicate_command/hold_interrupt/wrong_group 需 39001 TCP server 环境，无环境未跑。
-- **未验收**：FAULT_EXIT 排程行为（计划 §8 本轮不测）；§8.4 五次干净重启 prepare 仿真验收
-  （需 15 机 Gazebo SITL 完整环境，本次未执行）。不得视为已验证。
+- **验收（2026-09-01）**：§8.4 五次干净重启 prepare 仿真验收已执行，**0/5 通过**。
+  第 1 轮为排程性能 bug（5.012s > runtime accept 5s，已修复）；第 2-5 轮排程/START 全部正确
+  （SCHEDULE_OK、START deviation=0、ACCEPTED<5s），失败在机载执行阶段（trajectory_intent
+  INSUFFICIENT_DATA / EMERGENCY 监督），非排程器错误。详见 `test_record_26090106.md`。
+- **未验收**：FAULT_EXIT 排程行为（计划 §8 本轮不测）。机载 intent 链路稳定性属既有问题。
