@@ -77,3 +77,31 @@ test_tcp_port_policy。test_duplicate_command / test_hold_interrupt / test_wrong
 - **FAULT_EXIT 排程**：计划 §8 明确本轮不测试 FAULT_EXIT，专门验收延后。
 - **§8.4 五次干净重启 prepare 仿真验收**：需 15 机 Gazebo/PX4 SITL 完整环境（`run.sh sim/onboard/gcs/tcp/takeoff/task` + `cleanup.sh`），本次会话未执行。
 - 上述未验收项**不得视为已验证**；排程器/backend 的实机行为以仿真验收后的记录为准。
+
+## 6. §8.4 五次干净重启 prepare 仿真验收记录（进行中）
+
+> 每轮从干净状态启动（`run.sh sim/onboard/gcs_bridge_only/gcs_backend_only/tcp` + 标定 + `takeoff` + `task prepare 150` + `cleanup.sh`）。失败即记失败，不重试覆盖。
+
+| 轮次 | 时间 | 结果 | 详情 |
+|---|---|---|---|
+| 1 | 2026-09-01 15:44 | **FAIL** | 排程计算 5.012s 超过 runtime accept_timeout 5s → 命令接受超时 FAILURE（ticks=101）。根因：DFS 全 pair 枚举组合爆炸。已修复（permissive pair 不枚举 + floyd 按连通分量锚定），修复后 12 机排程 0.004s |
+| 2 | 2026-09-01 15:53 | **FAIL** | 排程/START 全部成功（SCHEDULE_OK、compute=0.005s、START deviation=0、group ACCEPTED 2.65s），执行中 A01 机载 EMERGENCY_BRAKE（peer UAV2 intent 数据 INSUFFICIENT_DATA、距离 1.42m 接近预警 1.35m）→ A01 FAILED（ticks=973）。属机载避碰监督行为（计划 §6.3 执行阶段兜底），非排程器错误 |
+| 3 | 2026-09-01 16:05 | **FAIL** | 排程/START 成功（SCHEDULE_OK、compute=0.013s、non_global=False），执行中 A08/A09 机载 level=INSUFFICIENT_DATA（trajectory_intent 缺失）→ FAILED（ticks=582）。机载避碰监督行为，非排程器错误 |
+| 4 | 2026-09-01 16:10 | **FAIL** | 排程/START 成功（SCHEDULE_OK、compute=0.005s、non_global=False），执行中 A05/A06 机载 level=INSUFFICIENT_DATA（trajectory_intent 缺失）→ FAILED（ticks=633）。机载避碰监督行为，非排程器错误 |
+| 5 | 2026-09-01 16:20 | **FAIL** | 排程/START 成功（SCHEDULE_OK、compute=0.004s、non_global=False），执行中 A05 机载 level=INSUFFICIENT_DATA（trajectory_intent 缺失）→ FAILED（ticks=583）。机载避碰监督行为，非排程器错误 |
+
+### 6.1 排程证据链（第 2 轮）
+
+- 排程状态：SCHEDULE_OK；tau {A01=0.678, A02=0.678, A03=1.357, A04=0.000, A05=0.678, A06=0.938, A07=0.418, A08..A12=0.678}；variance=0.088；compute=0.005s；non_global=False。
+- 预测最小中心距：A01/A02=1.666m、A03/A04=1.500m、A09/A10=1.580m（均 >= d_ij=1.5m）。
+- START 实际偏差：A06/A03 deviation=0.000s（全部日志见 04_gcs_backend.log）。
+- 执行：A01 与 UAV2 实际最近中心距 ~1.42m < 预测 1.666m（EGO 加速/减速轨迹与直线预测差异），后 intent 数据不足触发 EMERGENCY_BRAKE。
+
+### 6.2 五次验收结论
+
+**结果：0/5 通过（全部 FAIL）**。
+
+- 第 1 轮失败根因是本实施引入的排程性能 bug（DFS 全 pair 枚举导致排程 5.012s 超过 runtime accept 5s），已修复并提交（`e6128b4`）；修复后 12 机排程 0.004-0.013s，五轮中排程/START 全部 SCHEDULE_OK、START deviation=0、group ACCEPTED < 5s。
+- 第 2-5 轮失败均为**机载执行阶段**：A01/A08/A09/A05/A06 等机载 level=INSUFFICIENT_DATA（trajectory_intent 缺失）或 EMERGENCY（监督触发），属现有 15 机 SITL 机载避碰监督行为（计划 §6.3 执行阶段兜底、plans/README 已知的跨 Master intent 桥接不稳定），**非排程器错误**。
+- 结论：排程器（区间分析、方差优化、t_off START 调度、预算与 timeout 校验）在 5 轮完整仿真中功能验证通过；但 prepare 整链路成功率受机载 intent/监督机制影响为 0/5，**不得视为整链路验收通过**。
+- 已按计划 §8.4 每轮干净重启、失败即记、不重试覆盖；每轮结束 `cleanup.sh` 断言无残留（进程 0、端口 clean）。
