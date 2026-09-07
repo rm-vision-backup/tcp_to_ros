@@ -92,6 +92,7 @@ GCS_A 必须：
 | `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
 | `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；prepare 五次干净重启验收 0/5，失败均为机载 intent/监督，见 test_record_26090106）** |
+| `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **已实施（2026-09-08，见 状态-26090802）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -324,3 +325,31 @@ GCS_A 必须：
   （SCHEDULE_OK、START deviation=0、ACCEPTED<5s），失败在机载执行阶段（trajectory_intent
   INSUFFICIENT_DATA / EMERGENCY 监督），非排程器错误。详见 `test_record_26090106.md`。
 - **未验收**：FAULT_EXIT 排程行为（计划 §8 本轮不测）。机载 intent 链路稳定性属既有问题。
+
+## 状态-26090802：安全事件优先、目标代次、retry、直接锁存制动与组级安全广播（2026-09-08 已实施）
+
+- **变更 A**：完成转换两路径（`handleArrivalBeforeSnapshotLocked`/`checkArrival`）在
+  `emergency_pending_` 置位时让位且不清标志，交 replan 线程处理（不允许以 COMPLETED 掩盖安全事件）。
+- **变更 B**：`ReplanSnapshot` 记录 `target_consumed`（snapshot 时 `waypoint_consumed_`）；提交前若已推进
+  → 丢弃结果、不发布 intent、不清 pending，以新目标重跑。
+- **变更 C**：删除 `plan_fail_timeout_s` 时间窗与 soft-landing 术语；新增 `replan_retry_period_s=0.6` 与
+  `max_same_input_retries=5`（canonical `planner_defaults.yaml` + fail-fast 校验）；失败态 replanLoop 用 0.6s 周期，
+  相同输入签名（waypoint_consumed_+目标+邻机 (epoch,traj_id)）连续失败 ≥5 收口 `EGO_PLAN_FAILED`；
+  输入变化/成功提交清零。
+- **变更 D**：删除 `EmergencyBrakeGenerator` 调用路径与 `kStateEmergencyBrake`（源/单测/closed-loop 随删，
+  CMake 同步）；EMERGENCY/实时门禁/组级安全直接锁存悬停 `BRAKE_HOLD`（无制动轨迹、无 PHASE_BRAKING intent）。
+  BRAKE_HOLD 锁存守卫：`onGoal`/`onWaypoints`/`onHold`/`direct_control` 均不可转出。
+- **变更 E**：SafetyPredictor EMERGENCY 只置 `emergency_pending_`+`planning_requested_`（replan/预警/完成让位），
+  不再驱动锁存；唯一 emergency 锁存判据 = executor 单执行期 monitor（EGO 巡航与 follower 共用，同阈值 1m、
+  20Hz），触发即 `/brake_hold` 直接锁存 + `MIN_DISTANCE_BREACH` 收口。
+- **变更 F**：backend `gcs_a_backend_node.py` 安全类终态 error_code 白名单（BRAKE_HOLD/MIN_DISTANCE_BREACH/
+  EMERGENCY_BRAKE）→ 异步向目标集合（参数 `group_safety_hold_targets=all_enabled|participants`，默认 all_enabled
+  含 reserve）广播 `UavHold(reason=GROUP_SAFETY)`（分批/重试与 `_safe_hold` 同模式）。executor 精确按 reason 进
+  安全锁存位，拒绝后续普通任务/START；最小人工复位 `UavHold(reason=GROUP_SAFETY_RESET)`（节点重启亦复位）。
+  不改 msg/srv（reason 字符串约定）。
+- **测试**：`ego_planner_driver` 164 tests 0 failures（含新增 D/E/A/C 用例）；`swarm_uav_executor` 117 tests、
+  `tcp_to_ros` 60 tests 0 failures（含 `test_gcs_a_aggregation` 组级广播白名单/all_enabled/participants、
+  `test_executor` 安全锁存拒绝与复位、`test_ego_swarm_driver` 单 monitor/group brake-hold）。
+  详见 `test_records/test_record_26090802.md`。
+- **未验收**：EGO/PI 混编组级安全广播 PX4 SITL 端到端与 15-UAV prepare 无头回归（本批自动测试后按 §7/§8 受保护
+  验收执行，日志/ULog 另行归档）。
