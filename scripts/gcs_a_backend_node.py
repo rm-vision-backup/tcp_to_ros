@@ -113,6 +113,13 @@ STATE_ACCEPTED = "ACCEPTED"
 STATE_COMPLETED = "COMPLETED"
 STATE_FAILED = "FAILED"
 
+# 变更 F（26090802）：组级安全广播。安全类终态 error_code 白名单（普通
+# EGO_PLAN_FAILED/超时不在列）→ backend 向配置目标集合广播 UavHold(reason=GROUP_SAFETY)。
+SAFETY_ERROR_WHITELIST = frozenset(
+    {"BRAKE_HOLD", "MIN_DISTANCE_BREACH", "EMERGENCY_BRAKE"})
+GROUP_SAFETY_REASON = "GROUP_SAFETY"
+GROUP_SAFETY_HOLD_TARGETS = ("all_enabled", "participants")
+
 
 @dataclass
 class SingleUavConfirm:
@@ -160,6 +167,8 @@ class GroupState:
     hold_pending: List[str] = field(default_factory=list)
     held: List[str] = field(default_factory=list)
     hold_rejected: List[str] = field(default_factory=list)
+    # 变更 F：该任务是否已触发过一次组级安全广播（防重复）。
+    group_safety_broadcasted: bool = False
     error_code: str = ""
     message: str = ""
     # Time-offset scheduling results (plan 5.3/5.4). schedule_tau is the shifted
@@ -208,6 +217,17 @@ class GcsABackendNode:
         self.hold_retry_interval_s = float(
             rospy.get_param("~hold_retry_interval_s", DEFAULT_HOLD_RETRY_INTERVAL_S)
         )
+        # 变更 F：组级安全广播目标集合（backend_defaults.yaml canonical 默认
+        # all_enabled = 全 15 机含 reserve；participants = 当前任务参与机）。
+        raw_targets = str(
+            rospy.get_param("~group_safety_hold_targets", "all_enabled")
+        ).strip().lower()
+        if raw_targets not in GROUP_SAFETY_HOLD_TARGETS:
+            raise ValueError(
+                "group_safety_hold_targets must be one of %s, got %r"
+                % (GROUP_SAFETY_HOLD_TARGETS, raw_targets)
+            )
+        self.group_safety_hold_targets = raw_targets
 
         # Time-offset scheduling parameters (implementation_plan_26090106 §7).
         # Canonical values come from backend_defaults.yaml via the launch
@@ -260,6 +280,8 @@ class GcsABackendNode:
         self.calibration_ready = not self.require_calibration_ready
         self.reference_heading = 0.0
         enabled = [(item.uav_id, item.exec_target) for item in self.identity_map.uavs if item.enabled]
+        # 变更 F：全 enabled 集合（含 reserve）供组级安全广播使用（执行层 UAVn）。
+        self._enabled_exec_targets = [exec_target for _, exec_target in enabled]
         self.link_monitor = UavLinkMonitor(
             enabled,
             # fallback 与 backend_defaults.yaml 生产值一致（10.0/15.0/3.0），
@@ -462,6 +484,9 @@ class GcsABackendNode:
             self._absorb_state_locked(state, msg)
             if state.terminal_count() >= len(state.uav_ids):
                 state.stop_event.set()
+        # 变更 F：任一参与机安全类终态 error_code 命中白名单 → 异步触发一次组级
+        # 安全广播（不阻塞状态回调/Action/TCP）。
+        self._maybe_broadcast_group_safety(state)
 
     def _execute(self, goal) -> None:
         uav_ids = [item.uav_id for item in goal.assignments]
@@ -1310,6 +1335,117 @@ class GcsABackendNode:
                 rospy.logwarn(
                     "HOLD unconfirmed for %s, reason=%s", state.hold_rejected, reason
                 )
+
+    def _maybe_broadcast_group_safety(self, state: GroupState) -> None:
+        """任一参与机安全类终态命中白名单 → 一次组级安全广播（异步，不阻塞）。"""
+        trigger_uav = None
+        with state.lock:
+            if state.group_safety_broadcasted or state.stop_event.is_set():
+                return
+            for uav_id, status in state.terminal.items():
+                if status != STATE_FAILED:
+                    continue
+                latest = state.latest_states.get(uav_id)
+                if latest is not None and str(latest.error_code or "") in SAFETY_ERROR_WHITELIST:
+                    state.group_safety_broadcasted = True
+                    trigger_uav = uav_id
+                    break
+        if trigger_uav is None:
+            return
+        if self.group_safety_hold_targets == "participants":
+            targets = [state.exec_by_uav[u] for u in state.uav_ids
+                       if u in state.exec_by_uav]
+        else:
+            targets = list(self._enabled_exec_targets)
+        if not targets:
+            return
+        rospy.logwarn(
+            "Group safety broadcast triggered by %s (error_code whitelist); "
+            "GROUP_SAFETY hold -> %d UAVs",
+            trigger_uav, len(targets),
+        )
+        threading.Thread(
+            target=self._broadcast_group_safety_hold,
+            args=(state, targets),
+            daemon=True,
+        ).start()
+
+    def _broadcast_group_safety_hold(self, state: GroupState,
+                                     exec_targets: List[str]) -> None:
+        """向目标集合广播 UavHold(reason=GROUP_SAFETY)（含 reserve/未参与机）。
+
+        分批/重试与 _safe_hold 同一模式（hold_batch_size / hold_retry_count /
+        hold_retry_interval_s），并发调用避免桥接超时。异步调用方线程执行。
+        """
+
+        def hold_one(exec_target: str, accepted: set, rejected: dict,
+                     lock: threading.Lock) -> None:
+            service_name = "/{}/{}".format(exec_target, HOLD_SERVICE_SUFFIX)
+            request = UavHoldRequest()
+            request.protocol_version = PROTOCOL_VERSION
+            request.mission_id = state.mission_id
+            request.command_id = state.command_id
+            # 机载层统一使用执行层 UAVn 名称。
+            request.uav_id = exec_target
+            request.exec_target = exec_target
+            request.reason = GROUP_SAFETY_REASON
+            try:
+                proxy = rospy.ServiceProxy(service_name, UavHold)
+                outcome = self._call_service_with_timeout(
+                    proxy, request, self.confirm_wait_s)
+                if outcome.exception is not None:
+                    raise outcome.exception
+                with lock:
+                    if outcome.response.accepted:
+                        accepted.add(exec_target)
+                    else:
+                        rejected[exec_target] = "{}: {}".format(
+                            outcome.response.error_code, outcome.response.message)
+            except rospy.ServiceException as exc:
+                with lock:
+                    rejected[exec_target] = str(exc)
+
+        all_accepted = set()
+        all_rejected = {}
+        for start in range(0, len(exec_targets), self.hold_batch_size):
+            batch = exec_targets[start:start + self.hold_batch_size]
+            pending = list(batch)
+            for attempt in range(self.hold_retry_count + 1):
+                if not pending:
+                    break
+                lock = threading.Lock()
+                accepted: set = set()
+                rejected: dict = {}
+                threads = [
+                    threading.Thread(target=hold_one,
+                                     args=(uav_id, accepted, rejected, lock),
+                                     daemon=True)
+                    for uav_id in pending
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(timeout=self.confirm_wait_s + 1.0)
+                if attempt < self.hold_retry_count:
+                    time.sleep(self.hold_retry_interval_s)
+                    pending = [uav_id for uav_id in pending if uav_id not in accepted]
+            all_accepted.update(accepted)
+            all_rejected.update(rejected)
+        with state.lock:
+            for exec_target in all_accepted:
+                if exec_target not in state.held:
+                    state.held.append(exec_target)
+            for exec_target in all_rejected:
+                if exec_target not in state.hold_rejected:
+                    state.hold_rejected.append(exec_target)
+            if all_rejected:
+                state.message = (
+                    "GROUP_SAFETY hold not confirmed for: %s"
+                    % ",".join(all_rejected)
+                )
+        if all_rejected:
+            rospy.logwarn(
+                "GROUP_SAFETY hold unconfirmed for %s", list(all_rejected))
 
     def _handle_emergency_hold(self, request) -> EmergencyHoldResponse:
         with self._active_lock:

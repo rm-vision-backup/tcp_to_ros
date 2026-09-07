@@ -41,6 +41,11 @@ class GcsAAggregationTest(unittest.TestCase):
         self.node.hold_batch_size = 4
         self.node.hold_retry_count = 2
         self.node.hold_retry_interval_s = 0.5
+        self.node.group_safety_hold_targets = "all_enabled"
+        self.node._enabled_exec_targets = [
+            "UAV1", "UAV2", "UAV3", "UAV4", "UAV5", "UAV6", "UAV7", "UAV8",
+            "UAV9", "UAV10", "UAV11", "UAV12", "UAV13", "UAV14", "UAV15",
+        ]
         self.state = MODULE.GroupState(
             mission_id="mission-1",
             command_id="command-1",
@@ -127,6 +132,43 @@ class GcsAAggregationTest(unittest.TestCase):
             ["A01", "A02", "A03", "A04", "A05", "A06"],
         )
         self.assertEqual(state.hold_rejected, [])
+
+    def test_group_safety_broadcast_includes_all_enabled(self):
+        # 变更 F：白名单安全 error_code 终态 → 异步向 all_enabled（含 reserve）广播。
+        fail = make_state("A01", "UAV1", "FAILED", 3)
+        fail.error_code = "MIN_DISTANCE_BREACH"
+        self.node._absorb_state_locked(self.state, fail)
+        captured = []
+        self.node._broadcast_group_safety_hold = lambda state, targets: captured.extend(targets)
+        self.node._maybe_broadcast_group_safety(self.state)
+        time.sleep(0.05)
+        self.assertEqual(len(captured), 15)  # 含 reserve UAV13..UAV15
+        self.assertTrue(self.state.group_safety_broadcasted)
+        # 只触发一次。
+        self.node._maybe_broadcast_group_safety(self.state)
+        time.sleep(0.05)
+        self.assertEqual(len(captured), 15)
+
+    def test_group_safety_participants_target(self):
+        self.node.group_safety_hold_targets = "participants"
+        fail = make_state("A01", "UAV1", "FAILED", 3)
+        fail.error_code = "BRAKE_HOLD"
+        self.node._absorb_state_locked(self.state, fail)
+        captured = []
+        self.node._broadcast_group_safety_hold = lambda state, targets: captured.extend(targets)
+        self.node._maybe_broadcast_group_safety(self.state)
+        time.sleep(0.05)
+        self.assertEqual(sorted(captured), ["UAV1", "UAV2"])
+
+    def test_group_safety_whitelist_ignores_normal_failures(self):
+        fail = make_state("A01", "UAV1", "FAILED", 3)
+        fail.error_code = "EGO_PLAN_FAILED"  # 普通规划失败不在白名单
+        self.node._absorb_state_locked(self.state, fail)
+        self.node._broadcast_group_safety_hold = lambda state, targets: self.fail(
+            "ordinary failure must not broadcast GROUP_SAFETY")
+        self.node._maybe_broadcast_group_safety(self.state)
+        time.sleep(0.05)
+        self.assertFalse(self.state.group_safety_broadcasted)
 
     def test_late_service_response_remains_timed_out(self):
         def late_proxy(_request):
