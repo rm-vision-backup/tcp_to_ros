@@ -267,6 +267,7 @@ GCS_A 必须：
 | `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁（本记录） |
 | `test_records/test_record_26082916.md` | 参数配置整理与规范化：canonical YAML、接线、校验、flock 清理与回归记录 |
 | `test_records/test_record_26090106.md` | t_off 启动时序协调：排程器单元 + GCS 集成测试记录（仿真验收未执行） |
+| `test_records/test_record_26090722.md` | prepare 五次干净重启验收（schedule_safety_margin_m=1.0，d_ij=2.0m）：4/5 通过 |
 | `CONTEXT.md` | 领域词汇表 |
 | `../README.md` | 项目主 README（操作手册） |
 
