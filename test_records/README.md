@@ -4,6 +4,30 @@
 > 对应 `plans/implementation_plan_2608xxxx.md` 实施计划。
 > 启动流程与注意事项见本 README；`plans/` 为实施计划入口。
 
+## 0. 测试记录索引
+
+| 记录 | 内容 |
+|---|---|
+| `test_record_26082300.md` | 方案 B（机载分层航点 + C++ horizon/rebound）：prepare 首过（机间 0.64m 未达标） |
+| `test_record_26082400.md` | 周期性零速修复 + PositionTarget/relay 唯一出口：prepare SUCCESS（机间 0.42m 未达标） |
+| `test_record_26082420.md` | min-snap 单段重构：集群 prepare（距离门禁触发）、UAV1 776m 长轨迹 |
+| `test_record_26082421.md` | EGO intent 时间契约与主动避碰审计 |
+| `test_record_26082501.md` | 预测式避碰阶段 A–D 实施与自动测试 |
+| `test_record_26082602.md` | 门槛解耦（固定 clearance）+ 周期碰撞 replan + 监督层修订 |
+| `test_record_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + 方案 Y + 候选迭代 A/B |
+| `test_record_26082700.md` | 双机正交 ×5（4/5）+ prepare 全 active + 软着陆修复 |
+| `test_record_26082722.md` | 轨迹末端 OOM 修复 + 15-UAV acceptance（第 4 轮 SUCCESS） |
+| `test_record_26082916.md` | 参数规范化 canonical YAML（317 tests；prepare SUCCESS） |
+| `test_record_26083018.md` | `safe_valley_exp` 拆包 + 15-UAV prepare 三轮回归（预测窗 3s 后 SUCCESS） |
+| `test_record_26090106.md` | t_off 排程实施；prepare 五次验收 **0/5**（机载 intent/监督） |
+| `test_record_26090722.md` | prepare 五次验收 margin=1.0（d_ij=2.0m）：**4/5** |
+| `test_record_26090814.md` | 26090802 实施期源码 prepare 复测：**1/5** |
+| `test_record_26090816.md` | 26090802 回退后源码 prepare 复测：**4/5** |
+| `test_record_26090902.md` | 排程参数 1.3m/0.6mps + SLOW 1.5 档 prepare 五次复测：**4/5**（R2 A08/A09 实际 3D 破距） |
+
+> 记录命名 `test_record_yymmddhh.md`，时间后缀 = 文件生成时间；**实施状态以
+> `plans/README.md`「实施计划（现存）」表为唯一权威**，测试记录只存证据。
+
 ## 1. 无头 vs 有头测试
 
 | 维度 | 无头（headless） | 有头（GUI） |
