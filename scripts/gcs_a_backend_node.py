@@ -1371,11 +1371,12 @@ class GcsABackendNode:
         ).start()
 
     def _broadcast_group_safety_hold(self, state: GroupState,
-                                     exec_targets: List[str]) -> None:
+                                     exec_targets: List[str]) -> set:
         """向目标集合广播 UavHold(reason=GROUP_SAFETY)（含 reserve/未参与机）。
 
         分批/重试与 _safe_hold 同一模式（hold_batch_size / hold_retry_count /
         hold_retry_interval_s），并发调用避免桥接超时。异步调用方线程执行。
+        返回成功确认的执行层目标集合（exec_target → UavHold accepted=true）。
         """
 
         def hold_one(exec_target: str, accepted: set, rejected: dict,
@@ -1446,6 +1447,7 @@ class GcsABackendNode:
         if all_rejected:
             rospy.logwarn(
                 "GROUP_SAFETY hold unconfirmed for %s", list(all_rejected))
+        return all_accepted
 
     def _handle_emergency_hold(self, request) -> EmergencyHoldResponse:
         with self._active_lock:
@@ -1463,21 +1465,37 @@ class GcsABackendNode:
             )
         # SimpleActionServer 没有 cancel_goal_at_server（那是 client 的方法）。
         # 设置 active group 的 stop_event 让 _execute/_wait_for_terminal 线程
-        # 自行终止并发布终态结果；随后对所有活动参与机执行安全 HOLD。
+        # 自行终止并发布终态结果；随后对目标集合执行组级安全广播：executor 按
+        # reason=GROUP_SAFETY 进入 BRAKE_HOLD 直接锁存 + 安全锁存位（拒绝新任务/
+        # START），与“任一架机上报安全 error_code 自动广播”走同一锁存语义。
         with state.lock:
             state.stop_event.set()
             state.message = request.reason or "emergency hold"
             state.error_code = "EMERGENCY_HOLD"
-        self._safe_hold(state, reason=request.reason or "emergency hold")
+            state.group_safety_broadcasted = True  # 去重：runtime 主动 HOLD 已锁存
+        if self.group_safety_hold_targets == "participants":
+            targets = [state.exec_by_uav[u] for u in state.uav_ids
+                       if u in state.exec_by_uav]
+        else:
+            targets = list(self._enabled_exec_targets)
+        try:
+            confirmed = self._broadcast_group_safety_hold(state, targets)
+        except Exception as exc:
+            rospy.logerr("GROUP_SAFETY hold broadcast failed: %s", exc)
+            confirmed = set()
+        participant_exec = {
+            state.exec_by_uav[u] for u in state.uav_ids
+            if u in state.exec_by_uav
+        }
+        unconfirmed = sorted(participant_exec - confirmed)
         with state.lock:
-            held_ok = all(uav_id in state.held for uav_id in state.uav_ids)
+            held_ok = not unconfirmed
             if held_ok:
-                detail = "hold confirmed for all active UAVs"
+                detail = "hold confirmed for all active UAVs (GROUP_SAFETY)"
             else:
                 detail = (
-                    f"hold unconfirmed for: {','.join(state.hold_rejected)}"
-                    if state.hold_rejected
-                    else "no active UAVs to hold"
+                    "hold unconfirmed for: %s (GROUP_SAFETY)"
+                    % ",".join(unconfirmed)
                 )
         return EmergencyHoldResponse(
             accepted=held_ok,

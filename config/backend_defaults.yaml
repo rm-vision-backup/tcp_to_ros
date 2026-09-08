@@ -7,7 +7,8 @@
 
 # —— Action/Service 名称 ——
 action_name: /group_a/execute_task    # Action 服务器名（str）：backend 接收 ExecuteGroupTask 的入口
-emergency_hold_service: /group_a/emergency_hold  # 紧急 HOLD service 名（str）：链路丢失/失败时调用
+emergency_hold_service: /group_a/emergency_hold  # 紧急 HOLD service 名（str）：runtime HOLD 命令 / TCP 断连 / 链路丢失时调用；
+                                        #   内部按 GROUP_SAFETY 语义广播全组 BRAKE_HOLD 锁存（变更 F 26090802）
 
 # —— 任务下发前各机确认 ——
 confirm_wait_s: 1.0                   # 确认等待（s，>0）：下发任务后等待各机就绪确认的首段时长

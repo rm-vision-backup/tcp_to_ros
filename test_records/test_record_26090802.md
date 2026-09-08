@@ -102,3 +102,17 @@ catkin_test_results --all build/<pkg>                # 见 §3 计数
   锁存、拒绝新任务、`GROUP_SAFETY_RESET` 复位）未在本批自动测试内执行。
 - 15-UAV active prepare 无头回归未执行（需全 clean 环境、SITL/Gazebo + 跨 master bridge 编排）。
 - 本批只完成 build + 单测 + 包级自动测试；端到端按计划 §7/§8 另行受保护验收并归档日志/ULog。
+
+## 6. runtime 主动 HOLD → 全组 BRAKE_HOLD 锁存（同日补充）
+
+- 缺口：runtime TCP `HOLD` 原先走 backend `_handle_emergency_hold` → 普通 `_safe_hold`（reason 文本），
+  executor 只进普通 HOLD、不置安全锁存位、不覆盖 reserve；全组 BRAKE_HOLD 只能由单机安全 error_code
+  自动广播触发。
+- 修复：`_handle_emergency_hold` 改为同步 `_broadcast_group_safety_hold(reason=GROUP_SAFETY)`，目标按
+  `group_safety_hold_targets`（默认 all_enabled 含 reserve），participants（exec 层）全部确认才 accepted；
+  置 `group_safety_broadcasted` 去重。executor/driver 的 GROUP_SAFETY 锁存与 `GROUP_SAFETY_RESET` 复位复用。
+- `_broadcast_group_safety_hold` 增加返回值（成功确认的执行层集合），自动广播路径不受影响。
+- 文件：`gcs_a_backend_node.py`、`config/backend_defaults.yaml`、`test/test_gcs_a_aggregation.py`、
+  `plans/README.md`（本记录同步）。
+- 结果：`test_gcs_a_aggregation` 13/13 passed；`swarm_uav_executor`/`tcp_to_ros` 包级回归不变。
+- 限制：无活动组任务时不广播（返回 no active group）；普通 `_safe_hold`（批次正常收口）仍为软 HOLD 语义。

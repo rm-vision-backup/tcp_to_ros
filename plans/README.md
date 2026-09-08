@@ -353,3 +353,17 @@ GCS_A 必须：
   详见 `test_records/test_record_26090802.md`。
 - **未验收**：EGO/PI 混编组级安全广播 PX4 SITL 端到端与 15-UAV prepare 无头回归（本批自动测试后按 §7/§8 受保护
   验收执行，日志/ULog 另行归档）。
+
+## 状态-26090802（补充）：runtime 主动 HOLD 也走全组 BRAKE_HOLD 锁存（2026-09-08）
+
+- 现状缺口：runtime TCP `HOLD` 命令 → `tcp_server_node._handle_hold` → backend `EmergencyHold` service
+  `_handle_emergency_hold` 原先只调普通 `_safe_hold`（reason 文本），executor 只进普通 HOLD、不置安全锁存位、
+  不覆盖 reserve——即全组 BRAKE_HOLD 只能由“任一架机上报安全 error_code”自动触发，runtime 无法主动下达。
+- 修改：`_handle_emergency_hold` 改为同步调用 `_broadcast_group_safety_hold`（reason=GROUP_SAFETY，目标按
+  `group_safety_hold_targets`，默认 all_enabled 含 reserve），participants 全部确认才 accepted=true；并置
+  `group_safety_broadcasted` 去重。executor/driver 既有 reason 分类（BRAKE_HOLD 直接锁存 + 拒绝新任务/START，
+  `GROUP_SAFETY_RESET` 复位）原样生效。TCP 断连/链路丢失共用该 service，同样按锁存语义。
+- 测试：`test_gcs_a_aggregation` 13/13（含 runtime hold → all_enabled 15 机含 reserve、unconfirmed 参与机
+  反映到响应）。普通 backend `_safe_hold`（批次内正常收口）不受影响。
+- 限制：无活动组任务（`_active is None`）时仍返回“no active group”，不广播；活动组中的 reserve/未开始机
+  会被覆盖。
