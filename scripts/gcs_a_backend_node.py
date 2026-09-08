@@ -89,7 +89,7 @@ DEFAULT_HOLD_RETRY_INTERVAL_S = 0.5
 # Time-offset scheduling defaults. Canonical values live in backend_defaults.yaml
 # (implementation_plan_26090106 §7); these fallbacks mirror the YAML production
 # values so a missing rosparam cannot silently drift (26082916 §7 convention).
-DEFAULT_HORIZONTAL_SPEED_MPS = 0.6
+DEFAULT_HORIZONTAL_SPEED_MPS = 0.7
 DEFAULT_SCHEDULE_GEOMETRIC_DISTANCE_M = 1.3
 DEFAULT_SCHEDULE_SAFETY_MARGIN_M = 1.0
 DEFAULT_SCHEDULE_POSE_TIMEOUT_S = 1.0

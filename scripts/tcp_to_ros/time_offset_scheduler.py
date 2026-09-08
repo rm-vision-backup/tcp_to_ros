@@ -35,7 +35,7 @@ _MIN_DISPLACEMENT_M = 1e-6
 # +T_i). At those exact deltas the simultaneous-motion interval degenerates to
 # a single point where the model distance jumps discontinuously, so an open
 # boundary is represented as a closed interval shrunken inward by this pad.
-# 1e-3 s at 0.6 m/s is ~0.6 mm: negligible physically, it only keeps the QP
+# 1e-3 s at 0.7 m/s is ~0.7 mm: negligible physically, it only keeps the QP
 # solution strictly inside the safe (open) region.
 _I_EMPTY_BOUNDARY_PAD_S = 1e-3
 
