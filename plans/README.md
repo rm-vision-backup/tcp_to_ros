@@ -365,5 +365,8 @@ GCS_A 必须：
   `GROUP_SAFETY_RESET` 复位）原样生效。TCP 断连/链路丢失共用该 service，同样按锁存语义。
 - 测试：`test_gcs_a_aggregation` 13/13（含 runtime hold → all_enabled 15 机含 reserve、unconfirmed 参与机
   反映到响应）。普通 backend `_safe_hold`（批次内正常收口）不受影响。
+- 协议诚实性（同日补充）：`EmergencyHold.srv` 响应新增 `unconfirmed_uavs`（任务层 A-id）；TCP HOLD 先回
+  ACCEPTED（协议 §7 “可先回复”），参与者全部确认才 COMPLETED，有未确认则回 FAILED（error_code
+  `HOLD_UNCONFIRMED`，failed_uavs=未确认任务层 ID），不以 COMPLETED 掩盖未完成的安全悬停。
 - 限制：无活动组任务（`_active is None`）时仍返回“no active group”，不广播；活动组中的 reserve/未开始机
   会被覆盖。

@@ -112,7 +112,10 @@ catkin_test_results --all build/<pkg>                # 见 §3 计数
   `group_safety_hold_targets`（默认 all_enabled 含 reserve），participants（exec 层）全部确认才 accepted；
   置 `group_safety_broadcasted` 去重。executor/driver 的 GROUP_SAFETY 锁存与 `GROUP_SAFETY_RESET` 复位复用。
 - `_broadcast_group_safety_hold` 增加返回值（成功确认的执行层集合），自动广播路径不受影响。
-- 文件：`gcs_a_backend_node.py`、`config/backend_defaults.yaml`、`test/test_gcs_a_aggregation.py`、
-  `plans/README.md`（本记录同步）。
+- 协议诚实性（同日）：`EmergencyHold.srv` 响应新增 `string[] unconfirmed_uavs`（任务层 A-id，backend
+  从未确认参与者映射回）；tcp_server 对 HOLD 先回 ACCEPTED，全部参与者确认才 COMPLETED，否则回 FAILED
+  （error_code=`HOLD_UNCONFIRMED`、failed_uavs=未确认 A-id），不再无条件 COMPLETED。
+- 文件：`gcs_a_backend_node.py`、`tcp_server_node.py`、`mock_backend_node.py`、`srv/EmergencyHold.srv`、
+  `config/backend_defaults.yaml`、`test/test_gcs_a_aggregation.py`、`plans/README.md`（本记录同步）。
 - 结果：`test_gcs_a_aggregation` 13/13 passed；`swarm_uav_executor`/`tcp_to_ros` 包级回归不变。
 - 限制：无活动组任务时不广播（返回 no active group）；普通 `_safe_hold`（批次正常收口）仍为软 HOLD 语义。

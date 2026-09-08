@@ -4,3 +4,4 @@ string reason
 ---
 bool accepted
 string message
+string[] unconfirmed_uavs

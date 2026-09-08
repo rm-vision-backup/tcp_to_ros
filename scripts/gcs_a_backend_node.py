@@ -1456,12 +1456,14 @@ class GcsABackendNode:
             return EmergencyHoldResponse(
                 accepted=False,
                 message="no active group task to hold",
+                unconfirmed_uavs=[],
             )
         # Map local mission/uav ids onto the active group if mission matches.
         if request.mission_id and state.mission_id != request.mission_id:
             return EmergencyHoldResponse(
                 accepted=False,
                 message="active group mission_id mismatch",
+                unconfirmed_uavs=[],
             )
         # SimpleActionServer 没有 cancel_goal_at_server（那是 client 的方法）。
         # 设置 active group 的 stop_event 让 _execute/_wait_for_terminal 线程
@@ -1487,19 +1489,25 @@ class GcsABackendNode:
             state.exec_by_uav[u] for u in state.uav_ids
             if u in state.exec_by_uav
         }
-        unconfirmed = sorted(participant_exec - confirmed)
+        unconfirmed_exec = sorted(participant_exec - confirmed)
+        # 未确认参与者映射回任务层 A-id（TCP 协议 completed/failed 使用任务层 ID）。
+        unconfirmed = [
+            uav_id for uav_id in state.uav_ids
+            if state.exec_by_uav.get(uav_id) in set(unconfirmed_exec)
+        ]
         with state.lock:
-            held_ok = not unconfirmed
+            held_ok = not unconfirmed_exec
             if held_ok:
                 detail = "hold confirmed for all active UAVs (GROUP_SAFETY)"
             else:
                 detail = (
                     "hold unconfirmed for: %s (GROUP_SAFETY)"
-                    % ",".join(unconfirmed)
+                    % ",".join(unconfirmed_exec)
                 )
         return EmergencyHoldResponse(
             accepted=held_ok,
             message=detail,
+            unconfirmed_uavs=unconfirmed,
         )
 
     def shutdown(self) -> None:

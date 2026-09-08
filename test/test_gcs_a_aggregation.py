@@ -235,6 +235,7 @@ class GcsAAggregationTest(unittest.TestCase):
 
         self.assertFalse(response.accepted)
         self.assertIn("hold unconfirmed for: UAV1", response.message)
+        self.assertEqual(response.unconfirmed_uavs, ["A01", "A02"])
         # EmergencyHold must stop the executing group thread so it publishes a
         # terminal result, instead of calling a nonexistent server cancel API.
         self.assertTrue(self.state.stop_event.is_set())
@@ -260,6 +261,7 @@ class GcsAAggregationTest(unittest.TestCase):
         )()
         response = self.node._handle_emergency_hold(request)
         self.assertTrue(response.accepted)
+        self.assertEqual(response.unconfirmed_uavs, [])
         # 参与机 UAV1/UAV2 都确认；广播同时覆盖 reserve（15 机）。
         self.assertIn("UAV1", calls[0])
         self.assertIn("UAV15", calls[0])
