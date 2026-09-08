@@ -350,9 +350,11 @@ GCS_A 必须：
 - **测试**：`ego_planner_driver` 164 tests 0 failures（含新增 D/E/A/C 用例）；`swarm_uav_executor` 117 tests、
   `tcp_to_ros` 60 tests 0 failures（含 `test_gcs_a_aggregation` 组级广播白名单/all_enabled/participants、
   `test_executor` 安全锁存拒绝与复位、`test_ego_swarm_driver` 单 monitor/group brake-hold）。
-  详见 `test_records/test_record_26090802.md`。
-- **未验收**：EGO/PI 混编组级安全广播 PX4 SITL 端到端与 15-UAV prepare 无头回归（本批自动测试后按 §7/§8 受保护
-  验收执行，日志/ULog 另行归档）。
+  单测细节原记于 `test_records/test_record_26090802.md`（2026-09-08 删除，摘要保留于本条）。
+- **未验收/已执行**：EGO/PI 混编组级安全广播 PX4 SITL 端到端仍待故障注入受保护验收；15-UAV prepare 无头回归
+  已由 `swarm_simulation/bashs` 五次复测执行，**1/5 SUCCESS（R4，12/12 ticks=1628）**，其余 4 轮失败为机载
+  intent/监督偶发（R1/R3/R5）与 1 次组级 5s ACCEPTED 确认超时（R2），详见
+  `test_records/test_record_26090814.md`（失败轮日志已留档 `.ros_home_round1/2/3/5`）。
 
 ## 状态-26090802（补充）：runtime 主动 HOLD 也走全组 BRAKE_HOLD 锁存（2026-09-08）
 
