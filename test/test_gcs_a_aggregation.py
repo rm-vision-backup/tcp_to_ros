@@ -41,11 +41,6 @@ class GcsAAggregationTest(unittest.TestCase):
         self.node.hold_batch_size = 4
         self.node.hold_retry_count = 2
         self.node.hold_retry_interval_s = 0.5
-        self.node.group_safety_hold_targets = "all_enabled"
-        self.node._enabled_exec_targets = [
-            "UAV1", "UAV2", "UAV3", "UAV4", "UAV5", "UAV6", "UAV7", "UAV8",
-            "UAV9", "UAV10", "UAV11", "UAV12", "UAV13", "UAV14", "UAV15",
-        ]
         self.state = MODULE.GroupState(
             mission_id="mission-1",
             command_id="command-1",
@@ -133,43 +128,6 @@ class GcsAAggregationTest(unittest.TestCase):
         )
         self.assertEqual(state.hold_rejected, [])
 
-    def test_group_safety_broadcast_includes_all_enabled(self):
-        # 变更 F：白名单安全 error_code 终态 → 异步向 all_enabled（含 reserve）广播。
-        fail = make_state("A01", "UAV1", "FAILED", 3)
-        fail.error_code = "MIN_DISTANCE_BREACH"
-        self.node._absorb_state_locked(self.state, fail)
-        captured = []
-        self.node._broadcast_group_safety_hold = lambda state, targets: captured.extend(targets)
-        self.node._maybe_broadcast_group_safety(self.state)
-        time.sleep(0.05)
-        self.assertEqual(len(captured), 15)  # 含 reserve UAV13..UAV15
-        self.assertTrue(self.state.group_safety_broadcasted)
-        # 只触发一次。
-        self.node._maybe_broadcast_group_safety(self.state)
-        time.sleep(0.05)
-        self.assertEqual(len(captured), 15)
-
-    def test_group_safety_participants_target(self):
-        self.node.group_safety_hold_targets = "participants"
-        fail = make_state("A01", "UAV1", "FAILED", 3)
-        fail.error_code = "BRAKE_HOLD"
-        self.node._absorb_state_locked(self.state, fail)
-        captured = []
-        self.node._broadcast_group_safety_hold = lambda state, targets: captured.extend(targets)
-        self.node._maybe_broadcast_group_safety(self.state)
-        time.sleep(0.05)
-        self.assertEqual(sorted(captured), ["UAV1", "UAV2"])
-
-    def test_group_safety_whitelist_ignores_normal_failures(self):
-        fail = make_state("A01", "UAV1", "FAILED", 3)
-        fail.error_code = "EGO_PLAN_FAILED"  # 普通规划失败不在白名单
-        self.node._absorb_state_locked(self.state, fail)
-        self.node._broadcast_group_safety_hold = lambda state, targets: self.fail(
-            "ordinary failure must not broadcast GROUP_SAFETY")
-        self.node._maybe_broadcast_group_safety(self.state)
-        time.sleep(0.05)
-        self.assertFalse(self.state.group_safety_broadcasted)
-
     def test_late_service_response_remains_timed_out(self):
         def late_proxy(_request):
             time.sleep(0.05)
@@ -218,53 +176,28 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertEqual("no accepted response within confirm budget", confirm.message)
         self.assertGreaterEqual(len(calls), 1)
 
-    def test_emergency_hold_locks_group_safety_and_stops_action(self):
+    def test_emergency_hold_reports_rejected_uavs_and_cancels_action(self):
+        self.state.accepted_uavs = ["A01"]
         self.node._active = self.state
         self.node._active_lock = threading.RLock()
-        calls = []
 
-        def fake_broadcast(state, targets):
-            calls.append(list(targets))
-            return set()  # 无任何 executor 确认
+        def fake_hold(state, reason):
+            self.assertEqual("operator cancel", reason)
+            state.hold_pending.append("A01")
+            state.hold_rejected.append("A01")
 
-        self.node._broadcast_group_safety_hold = fake_broadcast
+        self.node._safe_hold = fake_hold
         request = type(
             "Request", (), {"mission_id": "mission-1", "reason": "operator cancel"}
         )()
         response = self.node._handle_emergency_hold(request)
 
         self.assertFalse(response.accepted)
-        self.assertIn("hold unconfirmed for: UAV1", response.message)
-        self.assertEqual(response.unconfirmed_uavs, ["A01", "A02"])
+        self.assertEqual("hold unconfirmed for: A01", response.message)
         # EmergencyHold must stop the executing group thread so it publishes a
         # terminal result, instead of calling a nonexistent server cancel API.
         self.assertTrue(self.state.stop_event.is_set())
         self.assertEqual("EMERGENCY_HOLD", self.state.error_code)
-        self.assertTrue(self.state.group_safety_broadcasted)
-        # 广播目标 = all_enabled（含 reserve），reason 走 GROUP_SAFETY 锁存语义。
-        self.assertEqual(len(calls[0]), 15)
-        self.assertIn("UAV13", calls[0])
-
-    def test_runtime_hold_broadcasts_group_safety_to_all_enabled(self):
-        self.node._active = self.state
-        self.node._active_lock = threading.RLock()
-        calls = []
-
-        def fake_broadcast(state, targets):
-            calls.append(list(targets))
-            state.held.extend(targets)  # 模拟全部确认
-            return set(targets)
-
-        self.node._broadcast_group_safety_hold = fake_broadcast
-        request = type(
-            "Request", (), {"mission_id": "mission-1", "reason": "runtime safe hold"}
-        )()
-        response = self.node._handle_emergency_hold(request)
-        self.assertTrue(response.accepted)
-        self.assertEqual(response.unconfirmed_uavs, [])
-        # 参与机 UAV1/UAV2 都确认；广播同时覆盖 reserve（15 机）。
-        self.assertIn("UAV1", calls[0])
-        self.assertIn("UAV15", calls[0])
 
     def test_link_loss_affects_only_participating_uav(self):
         self.node._active = self.state

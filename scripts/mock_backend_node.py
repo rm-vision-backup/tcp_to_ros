@@ -177,7 +177,6 @@ class MockBackendNode:
         return EmergencyHoldResponse(
             accepted=True,
             message=request.reason or "emergency hold triggered",
-            unconfirmed_uavs=[],
         )
 
     def _wait_interruptible(self, seconds: float) -> bool:

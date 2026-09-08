@@ -246,17 +246,6 @@ class TcpToRosServerNode:
             )
             self.cache.set_final(active.command.command_id, original_payload)
 
-        # 协议 §7/§4：HOLD 属安全命令，先回 ACCEPTED（表示已接管并执行安全悬停）。
-        accepted_payload = build_accepted(command, "hold accepted; group safety brake-hold in progress")
-        handler.send_json(accepted_payload)
-        self._publish_state(
-            command,
-            tcp_status="ACCEPTED",
-            ros_status="HELD",
-            detail="hold accepted; group safety brake-hold in progress",
-            active_uavs=command.uav_ids,
-        )
-
         try:
             response = self.emergency_hold(
                 EmergencyHoldRequest(
@@ -283,40 +272,19 @@ class TcpToRosServerNode:
             )
             return
 
-        if response.accepted:
-            payload = build_completed(
-                command,
-                command.uav_ids,
-                message=response.message or "hold completed",
-            )
-            self.cache.set_final(command.command_id, payload)
-            handler.send_json(payload)
-            self._publish_state(
-                command,
-                tcp_status="COMPLETED",
-                ros_status="HELD",
-                detail=response.message or "hold completed",
-                completed_uavs=command.uav_ids,
-            )
-            return
-
-        # 部分/全部参与者未确认安全锁存：诚实回 FAILED（含未确认任务层 ID），
-        # 不能以 COMPLETED 掩盖未完成的安全悬停。
-        failed_uavs = list(response.unconfirmed_uavs) or list(command.uav_ids)
-        payload = build_failed(
+        payload = build_completed(
             command,
-            failed_uavs,
-            error_code="HOLD_UNCONFIRMED",
-            message=response.message or "hold not confirmed",
+            command.uav_ids,
+            message=response.message or "hold completed",
         )
         self.cache.set_final(command.command_id, payload)
         handler.send_json(payload)
         self._publish_state(
             command,
-            tcp_status="FAILED",
-            ros_status="HOLD_FAILED",
-            detail=response.message or "hold not confirmed",
-            failed_uavs=failed_uavs,
+            tcp_status="COMPLETED",
+            ros_status="HELD",
+            detail=response.message or "hold completed",
+            completed_uavs=command.uav_ids,
         )
 
     def _on_feedback(self, goal_serial: int, feedback) -> None:

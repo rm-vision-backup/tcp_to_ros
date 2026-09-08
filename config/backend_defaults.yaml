@@ -7,8 +7,7 @@
 
 # —— Action/Service 名称 ——
 action_name: /group_a/execute_task    # Action 服务器名（str）：backend 接收 ExecuteGroupTask 的入口
-emergency_hold_service: /group_a/emergency_hold  # 紧急 HOLD service 名（str）：runtime HOLD 命令 / TCP 断连 / 链路丢失时调用；
-                                        #   内部按 GROUP_SAFETY 语义广播全组 BRAKE_HOLD 锁存（变更 F 26090802）
+emergency_hold_service: /group_a/emergency_hold  # 紧急 HOLD service 名（str）：链路丢失/失败时调用
 
 # —— 任务下发前各机确认 ——
 confirm_wait_s: 1.0                   # 确认等待（s，>0）：下发任务后等待各机就绪确认的首段时长
@@ -20,10 +19,6 @@ confirm_deadline_s: 4.0               # 确认截止（s，>0）：整个确认�
 hold_batch_size: 4                    # 每批 HOLD 下发的 UAV 数（int，>0）：分批避免 bridge 并发超时
 hold_retry_count: 2                   # HOLD 重试次数（int，>=0）：瞬时超时的重试上限
 hold_retry_interval_s: 0.5            # HOLD 重试间隔（s，>0）：重试间等待
-# —— 组级安全广播（变更 F，26090802）——
-group_safety_hold_targets: all_enabled  # 组级安全广播目标集合（enum {all_enabled,participants}）：
-                                        #   all_enabled=全 15 机（含 reserve/未参与机）；
-                                        #   participants=仅当前任务参与机。默认 all_enabled（051e84e §2.7/3.8）
 
 # —— 标定门禁 ——
 require_calibration_ready: true       # 是否要求标定就绪（bool）：true 时 calibration_ready 未达拒单
