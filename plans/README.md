@@ -92,7 +92,7 @@ GCS_A 必须：
 | `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
 | `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；prepare 五次干净重启验收 0/5，失败均为机载 intent/监督，见 test_record_26090106）** |
-| `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **已实施（2026-09-08，见 状态-26090802）** |
+| `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **曾实施（2026-09-08），当日源码回退至实施前；计划正文保留（见 状态-26090802）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -326,7 +326,7 @@ GCS_A 必须：
   INSUFFICIENT_DATA / EMERGENCY 监督），非排程器错误。详见 `test_record_26090106.md`。
 - **未验收**：FAULT_EXIT 排程行为（计划 §8 本轮不测）。机载 intent 链路稳定性属既有问题。
 
-## 状态-26090802：安全事件优先、目标代次、retry、直接锁存制动与组级安全广播（2026-09-08 已实施）
+## 状态-26090802：安全事件优先、目标代次、retry、直接锁存制动与组级安全广播（2026-09-08 实施，当日源码回退）
 
 - **变更 A**：完成转换两路径（`handleArrivalBeforeSnapshotLocked`/`checkArrival`）在
   `emergency_pending_` 置位时让位且不清标志，交 replan 线程处理（不允许以 COMPLETED 掩盖安全事件）。
@@ -351,12 +351,12 @@ GCS_A 必须：
   `tcp_to_ros` 60 tests 0 failures（含 `test_gcs_a_aggregation` 组级广播白名单/all_enabled/participants、
   `test_executor` 安全锁存拒绝与复位、`test_ego_swarm_driver` 单 monitor/group brake-hold）。
   单测细节原记于 `test_records/test_record_26090802.md`（2026-09-08 删除，摘要保留于本条）。
-- **未验收/已执行**：EGO/PI 混编组级安全广播 PX4 SITL 端到端仍待故障注入受保护验收；15-UAV prepare 无头回归
-  已由 `swarm_simulation/bashs` 五次复测执行，**1/5 SUCCESS（R4，12/12 ticks=1628）**，其余 4 轮失败为机载
-  intent/监督偶发（R1/R3/R5）与 1 次组级 5s ACCEPTED 确认超时（R2），详见
-  `test_records/test_record_26090814.md`（失败轮日志已留档 `.ros_home_round1/2/3/5`）。
+- **回退与复测记录**：本计划 A–F 于 2026-09-08 实施后当日回退源码（新增提交、不删历史：`ego_planner_driver`
+  dd27824 / `swarm_uav_executor` 395a9b4 / `tcp_to_ros` 89a6ff6），当前源码为实施前状态。上方单测计数与本段
+  `test_record_26090814.md` 的 prepare 复测（**1/5 SUCCESS（R4）**，失败轮日志已留档 `.ros_home_round1/2/3/5`）
+  均基于**回退前**源码执行；回退后复测另行记录（该记录已随源码回退归档）。
 
-## 状态-26090802（补充）：runtime 主动 HOLD 也走全组 BRAKE_HOLD 锁存（2026-09-08）
+## 状态-26090802（补充）：runtime 主动 HOLD 也走全组 BRAKE_HOLD 锁存（2026-09-08，随主变更一并回退）
 
 - 现状缺口：runtime TCP `HOLD` 命令 → `tcp_server_node._handle_hold` → backend `EmergencyHold` service
   `_handle_emergency_hold` 原先只调普通 `_safe_hold`（reason 文本），executor 只进普通 HOLD、不置安全锁存位、
