@@ -352,9 +352,11 @@ GCS_A 必须：
   `test_executor` 安全锁存拒绝与复位、`test_ego_swarm_driver` 单 monitor/group brake-hold）。
   单测细节原记于 `test_records/test_record_26090802.md`（2026-09-08 删除，摘要保留于本条）。
 - **回退与复测记录**：本计划 A–F 于 2026-09-08 实施后当日回退源码（新增提交、不删历史：`ego_planner_driver`
-  dd27824 / `swarm_uav_executor` 395a9b4 / `tcp_to_ros` 89a6ff6），当前源码为实施前状态。上方单测计数与本段
-  `test_record_26090814.md` 的 prepare 复测（**1/5 SUCCESS（R4）**，失败轮日志已留档 `.ros_home_round1/2/3/5`）
-  均基于**回退前**源码执行；回退后复测另行记录（该记录已随源码回退归档）。
+  dd27824 / `swarm_uav_executor` 395a9b4 / `tcp_to_ros` 89a6ff6），当前源码为实施前状态。
+  - **回退前**源码 prepare 复测：`test_record_26090814.md`，**1/5 SUCCESS（R4）**，失败轮日志曾留档
+    `.ros_home_round1/2/3/5`（已按要求删除）。
+  - **回退后**源码 prepare 复测：`test_records/test_record_26090816.md`，**4/5 SUCCESS（R1–R4）**，R5 FAIL
+    （A05/A06，约 30s 机载执行中途），失败轮日志 `.ros_home_round5`（332M）留档。
 
 ## 状态-26090802（补充）：runtime 主动 HOLD 也走全组 BRAKE_HOLD 锁存（2026-09-08，随主变更一并回退）
 
