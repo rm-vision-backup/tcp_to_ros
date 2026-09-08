@@ -36,11 +36,12 @@ link_health_pre_task_wait_s: 10.0     # 任务前链路健康等待（s，>0）�
 # schedule_status 与预测距离只写 tcp_to_ros 日志，不进 runtime/机载消息。
 move_to_schedule_enabled: true        # 是否对 MOVE_TO 启用 t_off 排程（bool）
 fault_exit_schedule_enabled: true     # 是否对 FAULT_EXIT 启用 t_off 排程（bool）
-horizontal_speed_mps: 0.7             # 排程预测水平速度（m/s，>0）：计划 §4.2 固定速度
-schedule_geometric_distance_m: 1.0    # 排程几何安全距离（m，>0）：与 3D 距离门禁 1.0m 一致（计划 §4.3）
+horizontal_speed_mps: 0.6             # 排程预测水平速度（m/s，>0）：计划 §4.2 固定速度（2026-09-08 由 0.7 下调）
+schedule_geometric_distance_m: 1.3    # 排程几何安全距离（m，>0）：计划 §4.3 几何包络（2026-09-08 由 1.0 上调，
+                                      #   对齐执行期三维门禁的保守包络）
 schedule_safety_margin_m: 1.0         # 排程安全裕度（m，>=0）：吸收定位/通信/启动/跟踪误差，
                                       #   实测终点偏差 0.2-0.7m（test_record_26082400）；当前取 1.0m，
-                                      #   d_ij = 1.0 + 1.0 = 2.0m（比默认 0.5m 更保守）
+                                      #   d_ij = 1.3 + 1.0 = 2.3m（比默认 0.5m 更保守）
 schedule_pose_timeout_s: 1.0          # 位姿新鲜度阈值（s，>0）：超过该时长 pose 判过期（计划 §5.2）
 schedule_time_epsilon_s: 1e-6         # 排程数值容差（s，>0）：区间边界/距离比较的浮点容差
 schedule_max_start_delay_s: 30.0      # 最大启动延迟（s，>0）：限制 max(tau_i')，超限排程前置失败（计划 §5.4）
