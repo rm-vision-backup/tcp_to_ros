@@ -23,7 +23,7 @@ sys.modules[SPEC.name] = MODULE
 SPEC.loader.exec_module(MODULE)
 
 
-def make_state(uav_id, exec_target, status, seq):
+def make_state(uav_id, exec_target, status, seq, error_code="", message=""):
     msg = UavTaskState()
     msg.mission_id = "mission-1"
     msg.command_id = "command-1"
@@ -31,6 +31,8 @@ def make_state(uav_id, exec_target, status, seq):
     msg.exec_target = exec_target
     msg.status = status
     msg.status_seq = seq
+    msg.error_code = error_code
+    msg.message = message
     return msg
 
 
@@ -176,28 +178,141 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertEqual("no accepted response within confirm budget", confirm.message)
         self.assertGreaterEqual(len(calls), 1)
 
-    def test_emergency_hold_reports_rejected_uavs_and_cancels_action(self):
-        self.state.accepted_uavs = ["A01"]
+    def _active_node(self):
         self.node._active = self.state
         self.node._active_lock = threading.RLock()
+        self.node.confirm_wait_s = 0.01
+        return self.node
 
-        def fake_hold(state, reason):
-            self.assertEqual("operator cancel", reason)
-            state.hold_pending.append("A01")
-            state.hold_rejected.append("A01")
+    def _make_hold_request(self, uav_ids=None, reason="operator cancel", mission_id="mission-1"):
+        return type(
+            "Request",
+            (),
+            {
+                "mission_id": mission_id,
+                "reason": reason,
+                "uav_ids": list(uav_ids) if uav_ids is not None else None,
+            },
+        )()
+
+    def test_emergency_hold_targets_subset_with_brake_hold_reason(self):
+        # implementation_plan_26090900 §4.2：runtime 指定 HOLD 只向 request 与
+        # group 交集的有效目标（started/未 terminal）以 RUNTIME_BRAKE_HOLD 下发；
+        # request 外的 group 成员不被波及。
+        self.state.started_uavs = ["A01", "A02"]
+        self._active_node()
+        calls = []
+
+        def fake_hold(state, reason, skip=None, targets=None):
+            calls.append((reason, list(targets or [])))
+            for uav_id in targets or []:
+                state.held.append(uav_id)
 
         self.node._safe_hold = fake_hold
-        request = type(
-            "Request", (), {"mission_id": "mission-1", "reason": "operator cancel"}
-        )()
-        response = self.node._handle_emergency_hold(request)
-
-        self.assertFalse(response.accepted)
-        self.assertEqual("hold unconfirmed for: A01", response.message)
-        # EmergencyHold must stop the executing group thread so it publishes a
-        # terminal result, instead of calling a nonexistent server cancel API.
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01"])
+        )
+        self.assertEqual(calls, [(MODULE.RUNTIME_BRAKE_HOLD_REASON, ["A01"])])
+        self.assertTrue(response.accepted)
+        self.assertEqual("hold confirmed for all requested active UAVs", response.message)
         self.assertTrue(self.state.stop_event.is_set())
         self.assertEqual("EMERGENCY_HOLD", self.state.error_code)
+
+    def test_emergency_hold_unconfirmed_target_rejects(self):
+        # 目标拒绝/未确认 → 整体 accepted=false，绝不构造假成功。
+        self.state.started_uavs = ["A01"]
+        self._active_node()
+        calls = []
+
+        def fake_hold(state, reason, skip=None, targets=None):
+            calls.append(list(targets or []))
+            state.hold_pending.extend(list(targets or []))
+            state.hold_rejected.extend(list(targets or []))
+
+        self.node._safe_hold = fake_hold
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01"])
+        )
+        self.assertEqual(calls, [["A01"]])
+        self.assertFalse(response.accepted)
+        self.assertEqual("hold unconfirmed for: A01", response.message)
+        # stop_event 置位以终止执行线程（EmergencyHold 语义）。
+        self.assertTrue(self.state.stop_event.is_set())
+
+    def test_emergency_hold_unknown_target_not_sent_and_rejected(self):
+        # request 目标不在 active group：不下发任何 HOLD，整体拒绝并说明原因。
+        self.state.started_uavs = ["A01"]
+        self._active_node()
+        self.node._safe_hold = lambda *args, **kwargs: self.fail(
+            "must not hold any UAV for unknown-only request"
+        )
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A03"])
+        )
+        self.assertFalse(response.accepted)
+        self.assertIn("no requested UAV in active group", response.message)
+
+    def test_emergency_hold_mixed_unknown_and_valid(self):
+        # 部分请求目标不在 group：有效目标照常 brake hold，但整体保守拒绝。
+        self.state.started_uavs = ["A01"]
+        self._active_node()
+        calls = []
+
+        def fake_hold(state, reason, skip=None, targets=None):
+            calls.append(list(targets or []))
+            for uav_id in targets or []:
+                state.held.append(uav_id)
+
+        self.node._safe_hold = fake_hold
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01", "A99"])
+        )
+        self.assertEqual(calls, [["A01"]])
+        self.assertFalse(response.accepted)
+        self.assertIn("requested outside active group: A99", response.message)
+
+    def test_emergency_hold_idempotent_when_already_held(self):
+        # 已 held 目标重复请求：幂等成功，不重复调用 service。
+        self.state.started_uavs = ["A01"]
+        self.state.held = ["A01"]
+        self._active_node()
+        self.node._safe_hold = lambda *args, **kwargs: self.fail(
+            "must not re-send HOLD for already-held target"
+        )
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01"])
+        )
+        self.assertTrue(response.accepted)
+        self.assertEqual("hold confirmed for all requested active UAVs", response.message)
+
+    def test_emergency_hold_non_started_target_is_unconfirmed(self):
+        # 未 started/已 terminal 目标不得默认为成功：请求含此类成员时保守拒绝。
+        self.state.started_uavs = ["A02"]
+        self._active_node()
+        calls = []
+
+        def fake_hold(state, reason, skip=None, targets=None):
+            calls.append(list(targets or []))
+            for uav_id in targets or []:
+                state.held.append(uav_id)
+
+        self.node._safe_hold = fake_hold
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01", "A02"])
+        )
+        # A01 未 started → 不下发、不得计为成功 → 整体拒绝。
+        self.assertEqual(calls, [["A02"]])
+        self.assertFalse(response.accepted)
+        self.assertEqual("hold unconfirmed for: A01", response.message)
+
+    def test_mission_mismatch_rejects(self):
+        self._active_node()
+        response = self.node._handle_emergency_hold(
+            self._make_hold_request(uav_ids=["A01"], mission_id="other")
+        )
+        self.assertFalse(response.accepted)
+        self.assertEqual("active group mission_id mismatch", response.message)
+
 
     def test_link_loss_affects_only_participating_uav(self):
         self.node._active = self.state
@@ -210,6 +325,100 @@ class GcsAAggregationTest(unittest.TestCase):
         self.assertEqual(["A01"], self.state.failed_uavs)
         self.assertEqual("UAV_LINK_LOST", self.state.error_code)
         self.assertTrue(self.state.stop_event.is_set())
+
+    def test_group_safety_fanout_fires_once_with_whitelist(self):
+        # implementation_plan_26090900 §4.3：白名单安全终态只触发一次 fan-out，
+        # reason=GROUP_BRAKE_HOLD:<error_code>:<trigger>，目标排除触发者/失联。
+        state = MODULE.GroupState(
+            mission_id="mission-1", command_id="command-1", command="MOVE_TO",
+            uav_ids=["A01", "A02", "A03", "A04", "A05", "A06"],
+            exec_by_uav={"A01": "UAV1", "A02": "UAV2", "A03": "UAV3",
+                         "A04": "UAV4", "A05": "UAV5", "A06": "UAV6"},
+            start_time=0.0,
+        )
+        state.started_uavs = ["A01", "A02", "A03", "A04", "A05", "A06"]
+        state.link_lost_uavs = ["A02"]
+        self.node._active = state
+        self.node._active_lock = threading.RLock()
+        calls = []
+
+        def fake_hold(group_state, reason, skip=None, targets=None):
+            calls.append((reason, list(targets or [])))
+            for uav_id in targets or []:
+                group_state.held.append(uav_id)
+
+        self.node._safe_hold = fake_hold
+        # 触发者 A05（UAV5）上报 FAILED/BRAKE_HOLD。
+        self.node._absorb_state_locked(
+            state,
+            make_state("A05", "UAV5", "FAILED", 7, error_code="BRAKE_HOLD"),
+        )
+        state.failed_uavs = ["A05"]
+        first = self.node._maybe_start_group_safety_hold(state)
+        self.assertTrue(first)
+        self.assertTrue(state.group_safety_hold_started)
+        self.assertEqual(state.group_safety_trigger_uav, "A05")
+        self.assertEqual(state.group_safety_error_code, "BRAKE_HOLD")
+        self.assertEqual(
+            calls,
+            [(MODULE.GROUP_BRAKE_HOLD_REASON_PREFIX + ":BRAKE_HOLD:A05",
+              ["A01", "A03", "A04", "A06"])],
+        )
+        # 第二次调用不再 fan-out（重复/乱序状态吸收后由一次性字段防重）。
+        self.assertFalse(self.node._maybe_start_group_safety_hold(state))
+        self.assertEqual(len(calls), 1)
+
+    def test_group_safety_fanout_excludes_terminal_and_trigger(self):
+        state = MODULE.GroupState(
+            mission_id="mission-1", command_id="command-1", command="MOVE_TO",
+            uav_ids=["A01", "A02", "A03"],
+            exec_by_uav={"A01": "UAV1", "A02": "UAV2", "A03": "UAV3"},
+            start_time=0.0,
+        )
+        state.started_uavs = ["A01", "A02", "A03"]
+        state.terminal["A01"] = MODULE.STATE_COMPLETED
+        self.node._active = state
+        self.node._active_lock = threading.RLock()
+        calls = []
+
+        def fake_hold(group_state, reason, skip=None, targets=None):
+            calls.append(list(targets or []))
+
+        self.node._safe_hold = fake_hold
+        self.node._absorb_state_locked(
+            state,
+            make_state("A03", "UAV3", "FAILED", 9, error_code="MIN_DISTANCE_BREACH"),
+        )
+        state.failed_uavs = ["A03"]
+        self.assertTrue(self.node._maybe_start_group_safety_hold(state))
+        # A01 已 COMPLETED → 排除；A02 仍执行 → 收口。
+        self.assertEqual(calls, [["A02"]])
+
+    def test_plain_failure_does_not_trigger_group_safety_fanout(self):
+        state = MODULE.GroupState(
+            mission_id="mission-1", command_id="command-1", command="MOVE_TO",
+            uav_ids=["A01", "A02"],
+            exec_by_uav={"A01": "UAV1", "A02": "UAV2"},
+            start_time=0.0,
+        )
+        state.started_uavs = ["A01", "A02"]
+        self.node._active = state
+        self.node._active_lock = threading.RLock()
+        calls = []
+
+        def fake_hold(group_state, reason, skip=None, targets=None):
+            calls.append(reason)
+
+        self.node._safe_hold = fake_hold
+        self.node._absorb_state_locked(
+            state,
+            make_state("A01", "UAV1", "FAILED", 3, error_code="EGO_PLAN_FAILED"),
+        )
+        state.failed_uavs = ["A01"]
+        # 非白名单错误码 → 不 fan-out（generic _safe_hold 由调用方处理）。
+        self.assertFalse(self.node._maybe_start_group_safety_hold(state))
+        self.assertEqual(calls, [])
+
 
     def test_link_lost_uav_is_skipped_by_group_hold(self):
         self.state.started_uavs = ["A01", "A02"]

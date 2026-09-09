@@ -113,6 +113,18 @@ STATE_ACCEPTED = "ACCEPTED"
 STATE_COMPLETED = "COMPLETED"
 STATE_FAILED = "FAILED"
 
+# implementation_plan_26090900：结构化安全终态白名单（error_code 精确匹配，禁止
+# 按 message 文本/任意 FAILED 模糊触发）。BRAKE_HOLD 为 C++ 直锁终态；
+# MIN_DISTANCE_BREACH 为 executor 实时 3D 兜底（§0，仍属白名单）；
+# EMERGENCY_BRAKE 保留兼容（旧版本可能残留，新实现不再产生）。
+GROUP_SAFETY_ERROR_CODES = frozenset(
+    {"BRAKE_HOLD", "MIN_DISTANCE_BREACH", "EMERGENCY_BRAKE"}
+)
+# runtime 指定 HOLD / 组级安全 HOLD 的机载 reason（executor→driver 据此路由
+# /brake_hold 直接锁存；详见 plans/implementation_plan_26090900 §4.1/§4.3）。
+RUNTIME_BRAKE_HOLD_REASON = "RUNTIME_BRAKE_HOLD"
+GROUP_BRAKE_HOLD_REASON_PREFIX = "GROUP_BRAKE_HOLD"
+
 
 @dataclass
 class SingleUavConfirm:
@@ -166,6 +178,11 @@ class GroupState:
     # non-negative tau_i' keyed by task-layer uav_id; schedule_status is log-only.
     schedule_tau: Dict[str, float] = field(default_factory=dict)
     schedule_status: str = ""
+    # 组级安全 fan-out 一次性防重（implementation_plan_26090900 §4.3）：任一参与
+    # UAV 上报白名单安全终态后只触发一次对同任务其他参与者的 UavHold。
+    group_safety_hold_started: bool = False
+    group_safety_trigger_uav: str = ""
+    group_safety_error_code: str = ""
 
     @property
     def key(self) -> str:
@@ -952,11 +969,15 @@ class GcsABackendNode:
             return
 
         if state.failed_uavs:
-            self._safe_hold(
-                state,
-                reason="task failed on participating UAV",
-                skip=state.link_lost_uavs,
-            )
+            # 白名单安全终态（BRAKE_HOLD/MIN_DISTANCE_BREACH/...）→ 组级安全
+            # fan-out（一次，直接 BRAKE_HOLD，排除触发者/已 terminal/失联）；
+            # 否则沿用通用失败收口 HOLD。
+            if not self._maybe_start_group_safety_hold(state):
+                self._safe_hold(
+                    state,
+                    reason="task failed on participating UAV",
+                    skip=state.link_lost_uavs,
+                )
             result = self._build_result(
                 final_status="FAILED",
                 failed_uavs=state.failed_uavs,
@@ -1216,7 +1237,11 @@ class GcsABackendNode:
         return request
 
     def _safe_hold(
-        self, state: GroupState, reason: str, skip: Optional[List[str]] = None
+        self,
+        state: GroupState,
+        reason: str,
+        skip: Optional[List[str]] = None,
+        targets: Optional[List[str]] = None,
     ) -> None:
         """Batched, retrying concurrent HOLD across active (accepted, not terminal) UAVs.
 
@@ -1225,7 +1250,14 @@ class GcsABackendNode:
         /uav_hold calls timed out on A12). Unconfirmed members of each batch
         are retried hold_retry_count times (default 2) with a
         hold_retry_interval_s (0.5s) gap to survive transient bridge timeouts.
+
+        ``targets`` (task-layer Axx subset, optional) restricts fan-out to the
+        requested subset when provided (implementation_plan_26090900 §4.2);
+        None keeps the historical all-started-active semantics.  Existing
+        filters are always retained: started, not terminal, not pending,
+        not in ``skip``.
         """
+        target_set = None if targets is None else set(targets)
         with state.lock:
             candidates = [
                 uav_id
@@ -1234,6 +1266,7 @@ class GcsABackendNode:
                 if state.terminal.get(uav_id) is None
                 and uav_id not in state.hold_pending
                 and (skip is None or uav_id not in skip)
+                and (target_set is None or uav_id in target_set)
             ]
             if not candidates:
                 return
@@ -1311,6 +1344,53 @@ class GcsABackendNode:
                     "HOLD unconfirmed for %s, reason=%s", state.hold_rejected, reason
                 )
 
+    def _maybe_start_group_safety_hold(self, state: GroupState) -> bool:
+        """One-shot group safety fan-out on a whitelisted terminal event.
+
+        implementation_plan_26090900 §4.3：任一参与 UAV 上报 FAILED 且
+        error_code ∈ {BRAKE_HOLD, MIN_DISTANCE_BREACH, EMERGENCY_BRAKE} → 只触发
+        一次：对同任务仍需收口的其他参与者（started、未 terminal、未失联、非
+        触发者）以 reason "GROUP_BRAKE_HOLD:<error_code>:<trigger>" 下发直接
+        BRAKE_HOLD。调用方为 Action/run_goal 线程（非 subscriber 回调，无持锁
+        跨 master 等待）。返回 True 表示本次失败已由组级安全 fan-out 处理。
+        """
+        with state.lock:
+            if state.group_safety_hold_started:
+                return False
+            trigger = None
+            code = ""
+            for uav_id in state.failed_uavs:
+                last = state.latest_states.get(uav_id)
+                error_code = str(getattr(last, "error_code", "") or "") if last else ""
+                if error_code in GROUP_SAFETY_ERROR_CODES:
+                    trigger = uav_id
+                    code = error_code
+                    break
+            if trigger is None:
+                return False
+            state.group_safety_hold_started = True
+            state.group_safety_trigger_uav = trigger
+            state.group_safety_error_code = code
+            targets = [
+                uav_id
+                for uav_id in state.uav_ids
+                if uav_id != trigger
+                and uav_id in state.started_uavs
+                and state.terminal.get(uav_id) is None
+                and uav_id not in state.link_lost_uavs
+            ]
+        reason = "{}:{}:{}".format(
+            GROUP_BRAKE_HOLD_REASON_PREFIX, code, trigger
+        )
+        rospy.logwarn(
+            "GCS_A group safety hold triggered by %s (%s); targets=%s",
+            trigger,
+            code,
+            ",".join(targets) if targets else "none",
+        )
+        self._safe_hold(state, reason=reason, targets=targets or None)
+        return True
+
     def _handle_emergency_hold(self, request) -> EmergencyHoldResponse:
         with self._active_lock:
             state = self._active
@@ -1327,24 +1407,49 @@ class GcsABackendNode:
             )
         # SimpleActionServer 没有 cancel_goal_at_server（那是 client 的方法）。
         # 设置 active group 的 stop_event 让 _execute/_wait_for_terminal 线程
-        # 自行终止并发布终态结果；随后对所有活动参与机执行安全 HOLD。
+        # 自行终止并发布终态结果；随后仅对本次请求的有效目标执行直接 BRAKE_HOLD
+        # （任务层 Axx 与 group 交集，request 外成员不下发，见 §4.2）。
+        raw_ids = getattr(request, "uav_ids", None) or []
+        requested = list(dict.fromkeys(raw_ids)) or list(state.uav_ids)
+        unknown = [uav_id for uav_id in requested if uav_id not in state.uav_ids]
+        effective = [uav_id for uav_id in requested if uav_id in state.uav_ids]
         with state.lock:
             state.stop_event.set()
             state.message = request.reason or "emergency hold"
             state.error_code = "EMERGENCY_HOLD"
-        self._safe_hold(state, reason=request.reason or "emergency hold")
+        executable = [
+            uav_id
+            for uav_id in effective
+            if uav_id in state.started_uavs
+            and state.terminal.get(uav_id) is None
+            and uav_id not in state.link_lost_uavs
+        ]
+        to_hold = [uav_id for uav_id in executable if uav_id not in state.held]
+        # runtime 指定安全 HOLD 一律以直接 BRAKE_HOLD 语义下发（§4.1/§3.2）。
+        # 无可执行目标（已全部 held / 全部不可执行）时不调用服务（幂等跳过）。
+        if to_hold:
+            self._safe_hold(
+                state,
+                reason=RUNTIME_BRAKE_HOLD_REASON,
+                targets=to_hold,
+            )
         with state.lock:
-            held_ok = all(uav_id in state.held for uav_id in state.uav_ids)
-            if held_ok:
-                detail = "hold confirmed for all active UAVs"
-            else:
-                detail = (
-                    f"hold unconfirmed for: {','.join(state.hold_rejected)}"
-                    if state.hold_rejected
-                    else "no active UAVs to hold"
-                )
+            unconfirmed = [
+                uav_id for uav_id in effective if uav_id not in state.held
+            ]
+        parts: List[str] = []
+        if unknown:
+            parts.append("requested outside active group: %s" % ",".join(unknown))
+        if unconfirmed:
+            parts.append("hold unconfirmed for: %s" % ",".join(unconfirmed))
+        if not effective:
+            parts.append("no requested UAV in active group")
+        detail = "; ".join(parts) if parts else "hold confirmed for all requested active UAVs"
+        # 保守语义：只要任一请求目标未确认（含未知/不可执行），整体 accepted=false，
+        # TCP 侧按原 assignments 全失败集合返回 FAILED/HOLD_REJECTED（§4.1 step 6）。
+        accepted = bool(effective) and not unknown and not unconfirmed
         return EmergencyHoldResponse(
-            accepted=held_ok,
+            accepted=accepted,
             message=detail,
         )
 
