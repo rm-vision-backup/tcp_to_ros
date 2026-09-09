@@ -93,7 +93,7 @@ GCS_A 必须：
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
 | `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；prepare 五次干净重启验收 0/5，失败均为机载 intent/监督，见 test_record_26090106）** |
 | `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **曾实施（2026-09-08），当日源码回退至实施前；计划正文保留（见 状态-26090802）** |
-| `implementation_plan_26090900.md` | runtime/当前任务 UAV 集群 brake hold：TCP HOLD 诚实失败语义 + 目标过滤；单机安全终态→同任务参与者 fan-out 直接 BRAKE_HOLD（预测判据+replan 余地，仅参与者，去 EMERGENCY_BRAKE） | **计划已建立，未实施（2026-09-09，见 状态-26090900）** |
+| `implementation_plan_26090900.md` | runtime/当前任务 UAV 集群 brake hold：TCP HOLD 诚实失败语义 + 目标过滤；单机安全终态→同任务参与者 fan-out 直接 BRAKE_HOLD（预测判据+replan 余地，仅参与者，去 EMERGENCY_BRAKE） | **已实施（2026-09-09，自动测试 354/0/0；SITL 组级直锁路径实测但 prepare SUCCESS 未达成，见 状态-26090900）** |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -376,7 +376,7 @@ GCS_A 必须：
 - 限制：无活动组任务（`_active is None`）时仍返回“no active group”，不广播；活动组中的 reserve/未开始机
   会被覆盖。
 
-## 状态-26090900：runtime/当前任务 UAV 集群 brake hold（2026-09-09 计划建立，未实施）
+## 状态-26090900：runtime/当前任务 UAV 集群 brake hold（2026-09-09 已实施）
 
 - **范围**：两类安全 HOLD。① runtime 指定集群 HOLD（TCP `command=HOLD`）：修 `tcp_server_node`
   `_handle_hold` 忽略 `EmergencyHold.accepted` 的假 COMPLETED（accepted=false → FAILED/
@@ -386,7 +386,8 @@ GCS_A 必须：
   reserve/已 terminal/失联/触发者）fan-out `UavHold`。
 - **机载直锁统一**（联动 `ego_planner_driver`/`swarm_uav_executor`）：所有安全出口汇到"直接
   BRAKE_HOLD"——捕获本机当前 pos/yaw → `steady_target_` → `setState(kStateBrakeHold)`，删除
-  `EmergencyBrakeGenerator`/`EMERGENCY_BRAKE` 中间态与制动轨迹执行分支。
+  `EmergencyBrakeGenerator`/`EMERGENCY_BRAKE` 中间态与制动轨迹执行分支；executor/driver 按 reason
+  （RUNTIME_BRAKE_HOLD / GROUP_BRAKE_HOLD）经新增 `/brake_hold` 路由直锁。
 - **触发判据（§0 决策修订，反 26090802 变更 E）**：锁存主判据 = SafetyPredictor 预测紧急
   （`min_d ≤ protected_distance_m(1.0)` 或 `ttc ≤ emergency_ttc_s(1.5)`）**且** replan/让路绕开失败
   （预测级 EMERGENCY 先置位唤醒 replanOnce，成功清除标志继续执行、不进锁存）；实时 3D 门禁
@@ -396,9 +397,16 @@ GCS_A 必须：
   HOLD 按 assignments 与活动任务参与者交集。
 - **不改 msg/srv**：复用 `EmergencyHold.srv`/`UavHold.srv`/`UavTaskState`；reason 用内部字符串约定
   （RUNTIME_BRAKE_HOLD / GROUP_BRAKE_HOLD）。
-- **状态**：计划已建立，**未实施**（源码基线 = 26090802 回退后；本计划不视为当前能力）。
-- **相关参数复测（非本计划实现）**：2026-09-09 对调度参数 `schedule_geometric_distance_m=1.3`、
-  `horizontal_speed_mps=0.6`（已按指示改回 0.7，commit `a2d0544`）与 SLOW 1.5 档的 prepare 五次
-  干净重启复测 **4/5**（R2 A08/A09+UAV6 实际 3D 0.778–0.966m 破 1m 门禁，机载既有问题族），
-  见 `test_records/test_record_26090902.md`。
+- **状态（2026-09-09）**：**已实施**。自动测试全工作区 **354 tests, 0 errors, 0 failures**；
+  受保护 prepare SITL 4 轮 **0 SUCCESS**（3 次真实 `MIN_DISTANCE_BREACH` 物理破距
+  0.627–0.963m + 1 次排程 pose 启动抖动）——每次破距均由 executor 实时兜底门禁触发，
+  **组级 fan-out → 其余参与机 direct BRAKE_HOLD locked 实测工作**（每轮 10 机、不含
+  trigger/terminal/reserve、事件前无提前锁存），详见
+  `test_records/test_record_26090919.md`。任务级完整 SUCCESS 轮未达成 ⇒ 不宣告整链路验收通过；
+  事件频率与参数组合（v=0.7 + geo=1.3）相关性需后续 5 轮对照确认（未验证项见测试记录 §4）。
+- **相关参数复测（非本计划实现）**：`schedule_geometric_distance_m=1.3`、`horizontal_speed_mps`
+  曾试 0.6 后按指示改回 0.7（`a2d0544`）与 SLOW 1.5 档的 prepare 五次复测 **4/5**
+  （R2 A08/A09+UAV6 实际 3D 0.778–0.966m 破 1m 门禁），见 `test_records/test_record_26090902.md`。
+- **代码提交**：ego `c772e96`、executor `a5e4a02`、tcp `29d779b`（backend）+ `9894052`（TCP）。
+
 
