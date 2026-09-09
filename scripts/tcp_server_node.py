@@ -39,6 +39,40 @@ from tcp_to_ros.server import (
 from tcp_to_ros.state import ActiveTaskRegistry
 
 
+def _hold_terminal_payload(
+    command: ParsedCommand,
+    accepted: bool,
+    message: str,
+    service_error: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Build the TCP terminal payload for a runtime HOLD command.
+
+    implementation_plan_26090900 §4.1：EmergencyHold 拒绝/异常绝不以 COMPLETED
+    假成功收口。accepted=false → FAILED/HOLD_REJECTED（failed_uavs = 原 HOLD
+    assignment 全集的 Axx）；ServiceException → FAILED/HOLD_SERVICE_FAILED；
+    只有 accepted=true 才 COMPLETED（completed_uavs = 原 assignments）。
+    """
+    if service_error:
+        return build_failed(
+            command,
+            command.uav_ids,
+            error_code="HOLD_SERVICE_FAILED",
+            message=service_error,
+        )
+    if not accepted:
+        return build_failed(
+            command,
+            command.uav_ids,
+            error_code="HOLD_REJECTED",
+            message=message or "emergency hold rejected",
+        )
+    return build_completed(
+        command,
+        command.uav_ids,
+        message=message or "hold completed",
+    )
+
+
 class TcpToRosServerNode:
     def __init__(self) -> None:
         self.host = rospy.get_param("~host", "0.0.0.0")
@@ -255,11 +289,8 @@ class TcpToRosServerNode:
                 )
             )
         except rospy.ServiceException as exc:
-            payload = build_failed(
-                command,
-                command.uav_ids,
-                error_code="HOLD_SERVICE_FAILED",
-                message=str(exc),
+            payload = _hold_terminal_payload(
+                command, False, str(exc), service_error=str(exc)
             )
             self.cache.set_final(command.command_id, payload)
             handler.send_json(payload)
@@ -272,20 +303,29 @@ class TcpToRosServerNode:
             )
             return
 
-        payload = build_completed(
-            command,
-            command.uav_ids,
-            message=response.message or "hold completed",
-        )
+        # implementation_plan_26090900 §4.1：按 EmergencyHold.accepted 反馈真实
+        # 终态；backend 拒绝时绝不构造假 COMPLETED（conservative 全请求失败集）。
+        accepted = bool(getattr(response, "accepted", False))
+        message = str(getattr(response, "message", "") or "")
+        payload = _hold_terminal_payload(command, accepted, message)
         self.cache.set_final(command.command_id, payload)
         handler.send_json(payload)
-        self._publish_state(
-            command,
-            tcp_status="COMPLETED",
-            ros_status="HELD",
-            detail=response.message or "hold completed",
-            completed_uavs=command.uav_ids,
-        )
+        if accepted:
+            self._publish_state(
+                command,
+                tcp_status="COMPLETED",
+                ros_status="HELD",
+                detail=message or "hold completed",
+                completed_uavs=command.uav_ids,
+            )
+        else:
+            self._publish_state(
+                command,
+                tcp_status="FAILED",
+                ros_status="HOLD_REJECTED",
+                detail=message or "emergency hold rejected",
+                failed_uavs=command.uav_ids,
+            )
 
     def _on_feedback(self, goal_serial: int, feedback) -> None:
         task = self.tasks.current()

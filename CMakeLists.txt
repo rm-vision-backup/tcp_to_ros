@@ -74,6 +74,7 @@ if(CATKIN_ENABLE_TESTING)
   catkin_add_nosetests(test/test_tcp_port_policy.py)
   catkin_add_nosetests(test/test_parameter_wiring.py)
   catkin_add_nosetests(test/test_time_offset_scheduler.py)
+  catkin_add_nosetests(test/test_tcp_hold_semantics.py)
 endif()
 
 install(DIRECTORY launch/
