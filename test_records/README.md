@@ -150,7 +150,8 @@ bash src/swarm_simulation/bashs/phases.sh <phase>
 - `gcs` 组合**已禁用**（两个 roslaunch 同时 auto-start master 11310 会竞争 XML-RPC，backend 冲突
   退出；一律 `gcs_bridge_only` → 就绪 → `gcs_backend_only` 分步）；
 - 后台进程 pid 写入 `$HLOG/*.pid`（`.ros_home/log/headless_test`），供 `cleanup.sh` 精确逆序停止；
-- 旧 `.tmp/headless_test/run.sh` 即本脚本的历史来源（08-30 后不再使用）。
+- 旧 `.tmp/headless_test/run.sh` 即本脚本的历史来源（08-30 后不再使用；2026-09-10 归档至
+  `.tmp/archive_260910/headless_test/`）。
 
 ### 3.3 脚本速查（启动/编排一律用正式入库版）
 
@@ -166,10 +167,11 @@ bash src/swarm_simulation/bashs/phases.sh <phase>
 | `verification/ego_smoke/reciprocal_15sitl.py` | 双机正交避碰编排（预检 → staging → 屏障 START → 采集 → HOLD；属 verification） |
 | `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停；`phases.sh onboard` 内部调用，默认 `EGO_SAFETY_SUPERVISOR_MODE=active`） |
 
-> 以下 `.tmp` 脚本为**历史版本（已被正式版取代/停用，勿再使用；清理候选）**：
-> `startup_ego_sitl.sh`（阶段 0→5 一键，末次使用 08-27/28）、`run_15uav_prepare.sh`（15-UAV
-> prepare 旧编排，09-07 后被 round 脚本取代）、`run_headless_prepare_260824{,15}.sh`（08-24
-> 旧式，仅历史参考）；`.tmp/headless_test/{run,cleanup,status,env}.sh` 为上述脚本的历史来源。
+> 以下 `.tmp` 脚本为**历史版本（已被 swarm_simulation/bashs 取代/停用；2026-09-10 已归档至
+> `.tmp/archive_260910/`，勿再使用）**：`startup_ego_sitl.sh`（阶段 0→5 一键，末次使用
+> 08-27/28）、`run_15uav_prepare.sh`（15-UAV prepare 旧编排，09-07 后被 round 脚本取代）、
+> `run_headless_prepare_260824{,15}.sh`（08-24 旧式，仅历史参考）；`.tmp/headless_test/
+> {run,cleanup,status,env}.sh` 为上述脚本的历史来源。
 > `.tmp/plots/` 与 `.tmp/scripts/replay_intent_consistency.py` 等为**分析/绘图工具**（无正式
 > 入库版、仍在用），不属于启动链，不随上表历史脚本清理。
 
