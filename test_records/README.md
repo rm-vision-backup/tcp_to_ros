@@ -262,3 +262,22 @@ python3 .tmp/scripts/replay_intent_consistency.py --pair UAV5,UAV6 --start <t0> 
 grep -c 'level=EMERGENCY' runtime_logs/ego_planner/UAV*.log
 ```
 
+## 8. 5 轮测试日志留档规则（2026-09-10 起）
+
+> 适用于 5 轮 prepare 复测（`.tmp/scripts/run_5_prepare_matrix_260909b.sh` 或人工逐轮
+> `src/swarm_simulation/bashs/round_prepare_15sitl.sh`）。历史旧命名 `.ros_home_roundN`
+> 不再使用。
+
+1. **每次跑 5 轮测试必须保存所有轮次的日志**（含 SUCCESS 轮），不得只留失败轮。
+2. **每轮日志目录命名**：`.ros_home_round<n>_<s|f>`
+   - `<n>` = 轮次编号（见第 3 条计数规则）；
+   - `<s|f>` = 按本轮结果取一个字母：`SUCCESS` → `s`，`FAILURE`/`UNKNOWN` → `f`；
+   - 例：第 1 轮 SUCCESS → `.ros_home_round1_s`；第 2 轮 FAILURE → `.ros_home_round2_f`。
+3. **轮次计数只计入实际运行了 prepare 任务的轮次**：
+   - 启动阶段即失败的轮次（sim/onboard/GCS/标定/tcp/takeoff 任一未就绪，如 tcp_server 39001
+     端口残留导致新 server bind 失败等 infra 原因，prepare 任务未真正派发执行）**不计入轮次计数**，
+     不占用 round 编号、不产生 `<s|f>` 目录；
+   - 该次重跑沿用当前轮次编号，并在测试记录中注明“启动失败不计轮次，重跑”及失败原因。
+4. 目录内容沿用失败留档惯例（整份 `.ros_home` 副本：sitl_iris_* ulog/机载 rosout/GCS 日志/
+   07_task JSON），SUCCESS 轮同样落一份，便于回放比对与绘图证据复现。
+
