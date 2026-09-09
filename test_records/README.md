@@ -44,7 +44,9 @@
 
 ## 2. 完整启动流程（无头/有头共通，阶段 0→7）
 
-> 推荐用 §3.1 `startup_ego_sitl.sh` 一键执行阶段 0→5；以下为各阶段人工执行的等价步骤。
+> 推荐用正式入库的 `src/swarm_simulation/bashs/round_prepare_15sitl.sh`（见 §3.1）一键跑完
+> 完整单轮（clean→sim→onboard→gcs→标定→tcp→takeoff→task→cleanup）；以下为人工分步的等价
+> 步骤，阶段脚本统一用 `src/swarm_simulation/bashs/phases.sh`（见 §3.2），不再用旧 `.tmp/headless_test`。
 
 ### 阶段 0：预检
 ```bash
@@ -56,7 +58,7 @@ rm -rf .ros_home && mkdir -p .ros_home/log
 
 ### 阶段 1：仿真层（15 机 PX4 SITL）
 ```bash
-bash .tmp/headless_test/run.sh sim          # gui:=false, master 11300, gazebo 11345
+bash src/swarm_simulation/bashs/phases.sh sim   # gui:=false, master 11300, gazebo 11345
 # 等待：15 个 px4 进程 + 日志 Spawn status = 15
 # 注：px4 sitl 进程**不注册 ROS 节点**（rosnode list 仅见 /gazebo /rosout），
 #     就绪判定用 `ps aux | grep -c '[p]x4 '`（≥15），不要用 `rosnode list | grep sitl_`。
@@ -65,16 +67,16 @@ bash .tmp/headless_test/run.sh sim          # gui:=false, master 11300, gazebo 1
 ### 阶段 2：机载层（15 机独立 Master，**统一 active 一次性启动，不重启**）
 ```bash
 # 15 机 MAVROS + executor 以统一监督模式一次性启动（默认 active，不再 shadow→active 重启）
-EGO_SAFETY_SUPERVISOR_MODE=active bash .tmp/headless_test/run.sh onboard
+EGO_SAFETY_SUPERVISOR_MODE=active bash src/swarm_simulation/bashs/phases.sh onboard   # 默认即 active
 # 等待：02_onboard.log 中 "ready UAV" 达 15（11311..11325）
 # 全部 15 机必须在同一次启动中 ready；不得对单机/子集做"重启/补启"。
 ```
 
 ### 阶段 3：GCS（bridge → backend → tcp，顺序避免 11310 竞态）
 ```bash
-bash .tmp/headless_test/run.sh gcs_bridge_only   # 先启动 bridge，等 /UAV1/uav_task 服务出现
-bash .tmp/headless_test/run.sh gcs_backend_only  # 再启动 backend
-bash .tmp/headless_test/run.sh tcp                # tcp_server_node 39001
+bash src/swarm_simulation/bashs/phases.sh gcs_bridge_only   # 先启动 bridge，等 /UAV1/uav_task 服务出现
+bash src/swarm_simulation/bashs/phases.sh gcs_backend_only  # 再启动 backend
+bash src/swarm_simulation/bashs/phases.sh tcp                # tcp_server_node 39001
 ```
 
 ### 阶段 4：标定（**必须在 takeoff 前，且各机 disarm**）
@@ -109,7 +111,7 @@ ROS_MASTER_URI=http://localhost:11310 python3 verification/ego_smoke/reciprocal_
 
 ### 阶段 7：清理与生命周期收口（**强制**）
 ```bash
-bash .tmp/headless_test/cleanup.sh           # 逆序停止 TCP→GCS→onboard→sim + 残留检查
+bash src/swarm_simulation/bashs/cleanup.sh   # 逆序停止 TCP→GCS→onboard→sim + 残留检查（后文 “cleanup.sh” 均指本正式版）
 # 断言：gazebo/px4/rosmaster/mavros 进程数 = 0；测试端口（39001/11300/11310..11325）全部释放
 ```
 - **测试结束（无论 PASS / FAIL / 超时）必须立即执行本阶段**；
@@ -119,42 +121,57 @@ bash .tmp/headless_test/cleanup.sh           # 逆序停止 TCP→GCS→onboard�
   **不依赖仿真进程运行**；而仿真进程持续占用 CPU/内存且可能覆盖/追加日志，干扰分析。
   仅当需要**在线收集**（实时订阅话题、录制 rosbag、观察实时 exec_state/机间距离）时才保持进程。
 - **禁止任何"就地恢复 / 单机重启 / 二次启动"动作**——需要重跑一律先 cleanup 断言无残留，
-  再回到阶段 0 整体干净重启（`startup_ego_sitl.sh` 或 `.tmp/scripts/run_15uav_prepare.sh`）。
+  再回到阶段 0 整体干净重启（`bash src/swarm_simulation/bashs/round_prepare_15sitl.sh --round N`）。
 
 ## 3. 套壳脚本（从仿真层到软起动）
 
-### 3.1 `startup_ego_sitl.sh`（一键，推荐）
+### 3.1 `round_prepare_15sitl.sh`（正式版单轮整套，推荐）
+
 ```bash
-bash .tmp/scripts/startup_ego_sitl.sh [UAV_LIST] [SAFETY_MODE]
-# 默认 UAV_LIST="1 2"（takeoff 测试机；批次任务传 "1 2 ... 15"）、SAFETY_MODE=active
+bash src/swarm_simulation/bashs/round_prepare_15sitl.sh --round N [--task prepare] [--timeout-s 150] [--keep-ros-home-on-fail 1]
+# 退出码：0=task SUCCESS；1=失败（--keep-ros-home-on-fail 1 时已把 .ros_home 留档 .ros_home_roundN）；2=用法错
 ```
-- 自动执行 **阶段 0→5**：预检 → sim → onboard（15 机**统一 SAFETY_MODE 一次性启动，不重启**）→
-  gcs(bridge→backend) → 标定 → takeoff → 各机高度确认；
-- 每步轮询就绪（`wait_until`），任一步失败即退出非零；
-- **失败后整体干净重启**（先 `cleanup.sh` 断言无残留，再重跑脚本），**不就地重试 offboard、
+
+- 自动执行 **阶段 0→7**：clean → `.ros_home` 隔离 → sim(15 px4) → onboard(15/15 ready) →
+  gcs bridge→backend + 标定（`/group_a/calibration_ready=true`）→ tcp(39001) → takeoff(15/15) →
+  task(prepare, timeout 150s) → RESULT →（失败留档）→ 无条件 cleanup；
+- 每阶段轮询就绪，任一阶段失败即退出非零并 cleanup；
+- **失败后整体干净重启**（脚本自带 cleanup，断言无残留后再跑），**不就地重试 offboard、
   不单机/子集重启机载层**；
-- 成功输出 READY + reciprocal 执行命令。
+- 成功即退出码 0，失败轮飞行记录自动保留在 `.ros_home_roundN`。
 
-### 3.2 `headless_test/run.sh`（分阶段编排）
+### 3.2 `phases.sh`（分阶段控制，正式版）
+
 ```bash
-bash .tmp/headless_test/run.sh <phase>
-# phase: sim | onboard | gcs | tcp | takeoff | task [name] | status | cleanup | uav_z <idx>
+bash src/swarm_simulation/bashs/phases.sh <phase>
+# phase: sim | onboard | gcs_bridge_only | gcs_backend_only | tcp | takeoff | task [name] | status | cleanup | uav_z <idx>
 ```
-- `gcs` 一次性启动 bridge+backend（**已废弃**：两 roslaunch 同时 auto-start master 11310 竞争
-  XML-RPC，backend 冲突退出；一律用 `gcs_bridge_only` → 就绪 → `gcs_backend_only` 分步）；
-- 所有后台进程 pid 写入 `$HLOG/*.pid`，供 `cleanup.sh` 精确逆序停止。
 
-### 3.3 其他辅助
+- `gcs` 组合**已禁用**（两个 roslaunch 同时 auto-start master 11310 会竞争 XML-RPC，backend 冲突
+  退出；一律 `gcs_bridge_only` → 就绪 → `gcs_backend_only` 分步）；
+- 后台进程 pid 写入 `$HLOG/*.pid`（`.ros_home/log/headless_test`），供 `cleanup.sh` 精确逆序停止；
+- 旧 `.tmp/headless_test/run.sh` 即本脚本的历史来源（08-30 后不再使用）。
+
+### 3.3 脚本速查（启动/编排一律用正式入库版）
+
 | 脚本 | 用途 |
 |---|---|
-| `.tmp/headless_test/cleanup.sh` | 逆序停止全部测试进程 + 端口/进程残留检查 |
-| `.tmp/headless_test/status.sh` | 各阶段就绪状态检查（px4/master/服务/高度；**px4 就绪用进程数，不用 rosnode list**） |
-| `.tmp/scripts/run_15uav_prepare.sh` | **15-UAV prepare 全自动编排（260830 起）**：cleanup → sim → onboard → gcs 分步 → tcp → takeoff → task，阶段间轮询就绪；标定检测用 `rosparam get /group_a/calibration_ready` |
-| `.tmp/scripts/startup_ego_sitl.sh` | 一键启动至 takeoff（阶段 0→5，双机/小规模推荐） |
-| `.tmp/scripts/return_land_all.py` | RTL 落地全部测试机（任务后收尾） |
-| `.tmp/scripts/run_headless_prepare_26082415.sh` | 旧式 prepare 编排（逐机独立启动 + 就绪补充轮，**已过时，仅历史参考**） |
-| `verification/ego_smoke/reciprocal_15sitl.py` | 双机正交避碰编排（预检 → staging → 屏障 START → 采集 → HOLD） |
-| `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停） |
+| `src/swarm_simulation/bashs/round_prepare_15sitl.sh` | **单轮整套（正式，推荐）**：clean→`.ros_home` 隔离→sim 15/15→onboard 15/15→gcs(bridge→backend)+标定→tcp 39001→takeoff 15/15→task prepare→RESULT→失败留档 `.ros_home_roundN`→cleanup；退出码 0=SUCCESS/1=FAIL/2=用法错 |
+| `src/swarm_simulation/bashs/phases.sh` | 分阶段控制：sim/onboard/gcs_bridge_only/gcs_backend_only/tcp/takeoff/task/status/cleanup/uav_z |
+| `src/swarm_simulation/bashs/cleanup.sh` | 逆序停止全部测试进程 + 端口/进程残留检查 |
+| `src/swarm_simulation/bashs/status.sh` | 各阶段就绪状态检查（px4/master/服务/高度；**px4 就绪用进程数，不用 rosnode list**） |
+| `src/swarm_simulation/bashs/env.sh` | 公共环境（`ROS_HOME`/`HLOG`/PX4/Gazebo 路径；日志 → `.ros_home/log/headless_test`） |
+| `.tmp/scripts/run_5_prepare_matrix_260909b.sh` | 5 轮串联 runner（包装正式单轮；轮间 30s 静默 + **强杀 tcp_server 39001 残留**——bashs cleanup 对该进程有已知缺口，仍必需） |
+| `.tmp/scripts/return_land_all.py` | RTL 落地全部测试机（任务后收尾；无正式入库版，仍可用） |
+| `verification/ego_smoke/reciprocal_15sitl.py` | 双机正交避碰编排（预检 → staging → 屏障 START → 采集 → HOLD；属 verification） |
+| `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 逐机机载层启动/停止（`stop 1..15` 逆序停；`phases.sh onboard` 内部调用，默认 `EGO_SAFETY_SUPERVISOR_MODE=active`） |
+
+> 以下 `.tmp` 脚本为**历史版本（已被正式版取代/停用，勿再使用；清理候选）**：
+> `startup_ego_sitl.sh`（阶段 0→5 一键，末次使用 08-27/28）、`run_15uav_prepare.sh`（15-UAV
+> prepare 旧编排，09-07 后被 round 脚本取代）、`run_headless_prepare_260824{,15}.sh`（08-24
+> 旧式，仅历史参考）；`.tmp/headless_test/{run,cleanup,status,env}.sh` 为上述脚本的历史来源。
+> `.tmp/plots/` 与 `.tmp/scripts/replay_intent_consistency.py` 等为**分析/绘图工具**（无正式
+> 入库版、仍在用），不属于启动链，不随上表历史脚本清理。
 
 ## 4. 注意事项
 
@@ -164,10 +181,10 @@ bash .tmp/headless_test/run.sh <phase>
 3. **GCS bridge 先启动再 backend**：两者竞争 11310 端口；先 bridge（等 `/UAV1/uav_task` 服务），
    再 backend，避免 bridge 起不来导致服务代理缺失。
 4. **失败后整体干净重启，绝不就地恢复**：不重试 offboard、**不单机/子集重启机载层**；
-   先 `cleanup.sh` 断言无残留，再 `startup_ego_sitl.sh` 从阶段 0 整体重来。
+   先 `cleanup.sh` 断言无残留，再 `round_prepare_15sitl.sh --round N` 从阶段 0 整体重来。
 5. **机载层统一 active 一次性启动**：不再区分 shadow/active、不再"active 重启测试机"；
-   `startup_ego_sitl.sh` / 阶段 2 以 `EGO_SAFETY_SUPERVISOR_MODE=active` 启动全部 15 机，
-   任一机 ready 缺失即判定本次启动失败（整体重来），不补启。
+   `round_prepare_15sitl.sh` / 阶段 2（`phases.sh onboard`）以 `EGO_SAFETY_SUPERVISOR_MODE=active`
+   （机载脚本默认）一次性启动全部 15 机，任一机 ready 缺失即判定本次启动失败（整体重来），不补启。
 6. **无头环境变量**：`LIBGL_ALWAYS_SOFTWARE=1`（env.sh 已设置）；机载层日志重定向
    `ROS_HOME=$WS/.ros_home`。
 7. **残留检查**：每次测试结束断言 gazebo/px4/rosmaster/mavros 进程 0、测试端口
@@ -178,7 +195,8 @@ bash .tmp/headless_test/run.sh <phase>
 ## 5. 测试生命周期铁律（agent 必读）
 
 > 目的：杜绝"测试结束后 agent 尝试再次启动/重启/恢复进程"导致状态异常、节点意外退出。
-> **agent 只允许在 `startup_ego_sitl.sh` 的一次性启动流程内启动进程；启动流程之外的一切
+> **agent 只允许在 `round_prepare_15sitl.sh`（`src/swarm_simulation/bashs/`）的一次性启动流程内
+> （或按 §3.2 `phases.sh` 顺序分步）启动进程；启动流程之外的一切
 > 启动/重启/就绪轮询动作一律禁止。**
 
 1. **测试结束即收口**：无论 PASS / FAIL / 超时，测试脚本返回后**立即**执行
@@ -186,7 +204,7 @@ bash .tmp/headless_test/run.sh <phase>
 2. **结束后禁止自动重启**：cleanup 之后 agent **不得**自动再启动仿真/机载层/GCS/TCP 中任何
    组件；不得对单机做"就绪检查 → 补启/重启"（如 `startup_offboard_ego.sh <idx>` 单独重启）。
 3. **重跑必须整体重来**：需要重跑测试时，先确认无残留（`cleanup.sh` + 进程/端口断言），
-   再从 `startup_ego_sitl.sh` 阶段 0 一次性启动；**禁止在部分进程存活的环境上追加启动**。
+   再以 `round_prepare_15sitl.sh --round N` 从阶段 0 整体重来；**禁止在部分进程存活的环境上追加启动**。
 4. **就地恢复即违规**：测试中某机载层节点意外退出时，**不得**就地重启该机；先整体
    `cleanup.sh`，将退出现象与日志记入测试记录，再从干净环境重跑。
 5. **单机故障判定**：测试中某机异常（如 EGO_PLAN_FAILED / MIN_DISTANCE_BREACH / 节点退出），
