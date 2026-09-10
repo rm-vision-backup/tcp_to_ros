@@ -1,0 +1,8 @@
+# Group A 原点校准集合（implementation_plan_26091101 §3.1/§3.3）
+# calibration_uavs: 参与 global/local pose 采样与原点/航向冻结的执行层 UAVn 集合
+#                   （非空、无重复，默认 UAV1–UAV6）。
+# all_uavs:         已知/部署的 UAVn 全集（UAV1–UAV16）；仅用于 gp_origin_confirmed
+#                   记账与逐机 ready 展示，不作为 ready 的全量阻塞门槛（缺席机不阻塞）。
+calibration_uavs: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6]
+all_uavs: [UAV1, UAV2, UAV3, UAV4, UAV5, UAV6, UAV7, UAV8,
+           UAV9, UAV10, UAV11, UAV12, UAV13, UAV14, UAV15, UAV16]

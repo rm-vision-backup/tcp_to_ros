@@ -26,9 +26,10 @@ swarm_uav_executor     每架 UAVn 的任务执行器（PREPARE/START/ABORT/HOLD
         └─ setpoint_relay        MAVROS `/mavros/setpoint_raw/local` 唯一发布者（仲裁/失效 HOLD）→ PX4
 ```
 
-**坐标约定**：任务坐标按右/前/上解释；GCS_A 用 A01-A06（标定计算集）arm 前全球位置中位数冻结
-全局原点，参考航向 = A01-A06 的圆周平均 yaw（30° 门禁），`mission_anchor=(0,0,0)`；冻结结果下发
-A01-A15，15 架全部回读确认 `gp_origin` 后才开放任务。A01-A12 仍是 formation-1/prepare/coverage 成员集，
+**坐标约定**：任务坐标按右/前/上解释；GCS_A 用 `calibration_uavs`（默认 A01-A06 对应
+UAV1–UAV6 执行层身份）arm 前全球位置中位数冻结全局原点，参考航向 = 该集合的圆周平均 yaw
+（30° 门禁），`mission_anchor=(0,0,0)`；冻结结果下发已登记 UAV 集合（`all_uavs`，默认
+UAV1–UAV16），参与机全部回读确认 `gp_origin` 后才开放任务。A01-A12 仍是 formation-1/prepare/coverage 成员集，
 不得与标定计算集混淆。
 
 ---
@@ -65,7 +66,7 @@ catkin_swarm6-2/
 
 | 能力 | 状态 | 说明 |
 |---|---|---|
-| 标定 | ✅ | A01-A06 采样冻结原点/航向，A01-A15 原点回读 15/15；**必须 disarm 时完成**（armed 时 `set_gp_origin` 被拒） |
+| 标定 | ✅ | `calibration_uavs`（默认 UAV1–UAV6）采样冻结原点/航向，`all_uavs` 原点回读确认；**必须 disarm 时完成**（armed 时 `set_gp_origin` 被拒） |
 | PREPARE/START/ABORT | ✅ | backend 整批并发确认，内部两阶段，runtime `timeout_s` 作整批绝对期限 |
 | 分层动作 | ✅ | planner TAKEOFF 软起飞至 5m 后 HOLD；任务 MOVE_TO 再进 15m 层→水平 EGO→目标 z；FOLLOW_ROUTE 12m；FAULT_EXIT 8m |
 | 固定编队 | ✅ | coverage-1 = A01-A12（3×4），coverage-2 = A01-A06+A13-A15（3×3）；集合不匹配拒绝 |
@@ -105,7 +106,7 @@ src/tcp_to_ros/test_records/test_record_26082300.md   （方案 B prepare）
 2. 启动仿真层：`roslaunch swarm_simulation multi_uav_ego_15sim.launch`（11300/11345，15 架 iris）
 3. 启动 15 机载层：`bash src/swarm_uav_executor/scripts/startup_offboard_ego.sh 1..15`（11311..11325）
 4. GCS_A：topology_group_a_sim.launch uav_name:=GCS_A（11310）
-5. backend+标定：gcs_a_backend.launch（须 disarm；A01-A06 计算原点/航向，A01-A15 回读 15/15 ready）
+5. backend+标定：gcs_a_backend.launch（须 disarm；`calibration_uavs` 计算原点/航向，`all_uavs` 回读 ready）
 6. TCP server：tcp_server_node.py（39001）
 7. 外部起飞准备：offboard_takeoff_15_sitl.py 1..15（HOLD/AUTO.LOITER → arm → OFFBOARD → planner TAKEOFF 软起飞 5m → HOLD）
 8. 批次：task_test.py --backend tcp --group A --task <TASK> --timeout-s <T>；executor PREPARE 只检查 armed/OFFBOARD/origin，全部 PREPARED 后 GCS START 启动任务
@@ -161,7 +162,7 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 3. **`swarm_uav_interfaces` 版本一致**：所有 GCS_A、bridge、UAVn 主机必须安装、构建、source 完全相同的接口 commit，否则 ROS 类型 MD5 不匹配。
 4. **端口约定**（多 Master 隔离）：仿真 11300、GCS_A 11310、UAVn = 11310+n（11311..11325）、Gazebo 11345、TCP 39001；PX4 SITL 仿真 TCP 4560..4574、MAVLink UDP 34580..34594。`39001` 位于常见 Linux 临时端口范围，GCS 主机必须通过 `net.ipv4.ip_local_reserved_ports` 保留，否则 ROS 节点的随机 XML-RPC 端口可能抢占它。启动前运行 `rosrun tcp_to_ros check_tcp_port.py --port 39001`；修改系统配置后须确认输出 `OK`。换环境需核对，尤其实机无独立 Master 端口时。
 5. **无 RC SITL 参数**：起飞脚本自动注入 `COM_RCL_EXCEPT=4`、`NAV_RCL_ACT=0`；`COM_RC_IN_MODE` 默认 2（RC 全模式启用），无虚拟摇杆且处于手动模式（POSCTL）arm 会被拒（`manual control lost`）——takeoff 脚本已通过**先切 HOLD/AUTO.LOITER（Auto 模式免 RC）**规避。实机建议保留 RC 仅应急接管，`COM_RC_IN_MODE` 保持默认。
-6. **标定需 disarm**：gcs_a_calibration 要求标定计算集 A01-A06 全 disarm + 数据连续 2s + 航向 30° 门禁；冻结结果下发 A01-A15 并要求 15/15 回读确认。armed 时 `gp_origin_receiver` 拒绝改原点。A01-A12 仍是 formation-1/prepare/coverage 成员集，不得改成 A01-A06。
+6. **标定需 disarm**：`gcs_a_calibration` 要求 `calibration_uavs`（默认 UAV1–UAV6）全 disarm + 数据连续 2s + 航向 30° 门禁；冻结结果下发 `all_uavs` 并要求全部回读确认；缺席/未上电 UAV 不阻塞 ready。armed 时 `gp_origin_receiver` 拒绝改原点。A01-A12 仍是 formation-1/prepare/coverage 成员集，不得改成 A01-A06。
 7. **backend 单实例**：重复启动 `gcs_a_backend.launch` 会因 `gcs_a_calibration` 节点重名冲突，先停旧实例。
 8. **executor `required=true`**：kill executor 会连带关闭整个机载层 launch（MAVROS/driver/bridge）→ offboard loss → LAND。
 9. **C++ 节点空闲态是 HOLD（无 IDLE）**：exec_state 初始/空闲为 `HOLD`；文档/脚本里旧 `IDLE` 表述是历史遗留。

@@ -43,15 +43,16 @@ class ParameterWiringTest(unittest.TestCase):
     def test_identity_map_is_complete_and_uniform(self):
         data = _load_yaml(CONFIG / "uav_identity_map.yaml")
         uavs = data["uavs"]
-        self.assertEqual(len(uavs), 15)
+        self.assertEqual(len(uavs), 16)
         uav_ids = [item["uav_id"] for item in uavs]
-        self.assertEqual(uav_ids, [f"A{i:02d}" for i in range(1, 16)],
-                         "A01..A15 必须连续无重复/跳号")
-        self.assertEqual(len(set(uav_ids)), 15, "uav_id 不得重复")
+        self.assertEqual(uav_ids, [f"A{i:02d}" for i in range(1, 17)],
+                         "A01..A16 必须连续无重复/跳号")
+        self.assertEqual(len(set(uav_ids)), 16, "uav_id 不得重复")
         exec_targets = [item["exec_target"] for item in uavs]
-        self.assertEqual(exec_targets, [f"UAV{i}" for i in range(1, 16)],
-                         "exec_target 必须 UAV1..UAV15")
-        self.assertEqual(len(set(exec_targets)), 15, "exec_target 不得重复")
+        self.assertEqual(exec_targets, [f"UAV{i}" for i in range(1, 17)],
+                         "exec_target 必须 UAV1..UAV16")
+        self.assertEqual(len(set(exec_targets)), 16, "exec_target 不得重复")
+        self.assertEqual(len({item["ip"] for item in uavs}), 16, "实机 IP 不得重复")
 
     def test_backend_defaults_hold_production_link_values(self):
         data = _load_yaml(CONFIG / "backend_defaults.yaml")
@@ -133,14 +134,93 @@ class ParameterWiringTest(unittest.TestCase):
         bridge_data = _load_yaml(BRIDGE_DIR / "config" / "topology_group_a_sim.yaml")
         names = [item["name"] for item in bridge_data["uavs"]]
         self.assertIn("GCS_A", names)
-        self.assertEqual(len(names), 16)
-        self.assertTrue(all(f"UAV{i}" in names for i in range(1, 16)))
+        self.assertEqual(len(names), 17)
+        self.assertTrue(all(f"UAV{i}" in names for i in range(1, 17)))
+        offsets = {item["name"]: int(item.get("port_offset", 0))
+                   for item in bridge_data["uavs"]}
+        self.assertEqual(offsets["UAV16"], 1600,
+                         "仿真 UAV16 必须独立 port_offset（不与 GCS_A 同 offset）")
+        self.assertEqual(len(set(offsets.values())), len(offsets),
+                         "仿真 port_offset 不得重叠")
 
     def test_tcp_topology_launch_includes_bridge_wrapper(self):
         root = ET.parse(str(LAUNCH / "topology_group_a_sim.launch")).getroot()
         includes = [item.get("file", "") for item in root.findall("include")]
         self.assertTrue(any("swarm_topology_bridge" in f for f in includes),
                         "tcp wrapper 必须 include bridge launch")
+
+    def test_calibration_defaults_use_execution_identity(self):
+        # implementation_plan_26091101 §3.1：校准集合参数使用执行层 UAVn。
+        data = _load_yaml(CONFIG / "calibration_defaults.yaml")
+        self.assertEqual(data["calibration_uavs"],
+                         [f"UAV{i}" for i in range(1, 7)])
+        self.assertEqual(data["all_uavs"],
+                         [f"UAV{i}" for i in range(1, 17)])
+        self.assertTrue(set(data["calibration_uavs"]).issubset(set(data["all_uavs"])))
+        self.assertTrue(all(item.startswith("UAV") for item in data["all_uavs"]),
+                        "校准集合必须使用执行层 UAVn，不得使用 Axx")
+
+    def test_backend_launch_wires_calibration_params(self):
+        # implementation_plan_26091101 §3.3：集合/身份文件显式加载到校准节点。
+        root = ET.parse(str(LAUNCH / "gcs_a_backend.launch")).getroot()
+        node = next(node for node in root.findall(".//node")
+                    if node.get("type") == "gcs_a_calibration_node.py")
+        loads = [item.get("file", "") for item in node.findall("rosparam")
+                 if item.get("command") == "load"]
+        self.assertTrue(any("calibration_defaults.yaml" in f for f in loads),
+                        "gcs_a_calibration 必须显式加载 calibration_defaults.yaml")
+        params = {item.get("name"): item.get("value", "")
+                  for item in node.findall("param")}
+        self.assertIn("identity_file", params, "校准节点必须显式加载身份文件路径")
+
+    def test_production_topology_is_real_deployment(self):
+        # implementation_plan_26091101 §4.2：实机生产拓扑（GCS_A + UAV1..UAV16，offset=0）。
+        data = _load_yaml(BRIDGE_DIR / "config" / "topology.yaml")
+        names = [item["name"] for item in data["uavs"]]
+        self.assertEqual(names[0], "GCS_A")
+        self.assertEqual(len(names), 17)
+        self.assertTrue(all(f"UAV{i}" in names for i in range(1, 17)))
+        self.assertTrue(all(int(item.get("port_offset", 0)) == 0
+                            for item in data["uavs"]), "实机所有节点 port_offset=0")
+        self.assertEqual(data["base_port"], 4200)
+        self.assertEqual(data["service_base_port"], 14000)
+        services = [item["name"] for item in data["services"]]
+        for i in range(1, 17):
+            for suffix in ("uav_task", "uav_task_control", "uav_hold"):
+                self.assertIn(f"/UAV{i}/{suffix}", services)
+        self.assertFalse(any("/test_srv" in name for name in services),
+                         "生产拓扑不得包含 /test_srv")
+        self.assertEqual(set(data["topology"]), set(names),
+                         "topology 接收矩阵必须覆盖全部节点")
+
+    def test_test_launch_isolated_from_production_topology(self):
+        # implementation_plan_26091101 §8：测试拓扑独立，生产替换不影响 /test_srv。
+        root = ET.parse(str(BRIDGE_DIR / "launch" / "test.launch")).getroot()
+        loads = [item.get("file", "") for item in root.findall(".//rosparam")
+                 if item.get("command") == "load"]
+        self.assertTrue(any("topology_test.yaml" in f for f in loads))
+        self.assertFalse(any(f.endswith("config/topology.yaml") for f in loads),
+                         "test.launch 不得加载生产 topology.yaml")
+        test_topology = _load_yaml(BRIDGE_DIR / "config" / "topology_test.yaml")
+        self.assertTrue(any(item["name"].startswith("/test_srv/")
+                            for item in test_topology["services"]))
+
+    def test_real_entry_launches_separate_from_sim(self):
+        # implementation_plan_26091101 §5/§7：实机入口与仿真入口分离并实际接线。
+        exec_dir = TCP_DIR.parents[0] / "swarm_uav_executor"
+        real = ET.parse(str(exec_dir / "launch" / "uav_offboard_ego_real.launch")).getroot()
+        includes = [item.get("file", "") for item in real.findall("include")]
+        self.assertTrue(any("bridge_group_a_real.launch" in f for f in includes))
+        real_args = {item.get("name"): item.get("default", "")
+                     for item in real.findall("arg")}
+        self.assertIn("topology_config", real_args)
+        self.assertIn("fcu_url", real_args)
+        sim = ET.parse(str(exec_dir / "launch" / "uav_offboard_ego.launch")).getroot()
+        sim_includes = [item.get("file", "") for item in sim.findall("include")]
+        self.assertTrue(any("topology_group_a_sim.launch" in f for f in sim_includes))
+        gcs_real = ET.parse(str(LAUNCH / "gcs_a_real.launch")).getroot()
+        gcs_includes = [item.get("file", "") for item in gcs_real.findall("include")]
+        self.assertTrue(any("bridge_group_a_real.launch" in f for f in gcs_includes))
 
 
 if __name__ == "__main__":

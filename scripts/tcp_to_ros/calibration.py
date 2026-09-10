@@ -65,3 +65,49 @@ def task_point_to_local_enu(x: float, y: float, z: float, heading: float,
     dy = float(y) - float(anchor[1])
     ex, ny = task_vector_to_enu(dx, dy, heading)
     return ex, ny, float(z) - float(anchor[2])
+
+
+def validate_calibration_config(calibration_uavs, all_uavs, identities=None):
+    """Validate execution-layer (UAVn) calibration/confirmation sets.
+
+    implementation_plan_26091101 §3.1/§3.2:
+    - ``calibration_uavs`` is the required set used to sample global/local
+      pose and freeze origin/heading; it must be non-empty and duplicate-free.
+    - ``all_uavs`` is the known/deployed set used only for
+      ``gp_origin_confirmed`` bookkeeping; it must be non-empty and
+      duplicate-free and a superset of ``calibration_uavs``.
+    - ``identities`` (optional sequence of identity entries exposing
+      ``exec_target`` and ``enabled``) tightens validation: every configured
+      UAVn must exist as a unique, enabled ``exec_target``.
+
+    Returns ``(calibration_uavs, all_uavs)`` as tuples; raises ``ValueError``
+    on any violation (fail-closed at startup).
+    """
+    calibration = tuple(str(item) for item in calibration_uavs)
+    known = tuple(str(item) for item in all_uavs)
+    if not calibration:
+        raise ValueError("calibration_uavs must not be empty")
+    if not known:
+        raise ValueError("all_uavs must not be empty")
+    if len(set(calibration)) != len(calibration):
+        raise ValueError("calibration_uavs contains duplicates")
+    if len(set(known)) != len(known):
+        raise ValueError("all_uavs contains duplicates")
+    if not set(calibration).issubset(set(known)):
+        raise ValueError("calibration_uavs must be a subset of all_uavs")
+    if identities is not None:
+        enabled = {}
+        for entry in identities:
+            target = str(getattr(entry, "exec_target", ""))
+            if not target:
+                raise ValueError("identity map contains an empty exec_target")
+            if target in enabled:
+                raise ValueError("identity map repeats exec_target %s" % target)
+            enabled[target] = bool(getattr(entry, "enabled", True))
+        for uav in known:
+            if uav not in enabled:
+                raise ValueError("configured UAV %s missing from identity map" % uav)
+            if not enabled[uav]:
+                raise ValueError("configured UAV %s is disabled in identity map" % uav)
+    return calibration, known
+

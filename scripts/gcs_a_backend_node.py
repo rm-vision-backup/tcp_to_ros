@@ -192,6 +192,24 @@ class GroupState:
         return len(self.terminal)
 
 
+def default_identity_map_path() -> str:
+    """Resolve the packaged identity map without a workspace-absolute path.
+
+    implementation_plan_26091101 §7: prefer the ROS package path; fall back to
+    the source-tree layout when ``rospkg`` is unavailable (plain unit tests).
+    """
+    import os
+
+    try:
+        import rospkg
+
+        return os.path.join(rospkg.RosPack().get_path("tcp_to_ros"),
+                            "config", "uav_identity_map.yaml")
+    except Exception:
+        return os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            os.pardir, "config", "uav_identity_map.yaml")
+
+
 class GcsABackendNode:
     def __init__(self) -> None:
         self.action_name = rospy.get_param("~action_name", "/group_a/execute_task")
@@ -201,7 +219,7 @@ class GcsABackendNode:
         )
         self.identity_map_path = rospy.get_param(
             "~map_file",
-            "/home/ub20tg/catkin_swarm6-2/src/tcp_to_ros/config/uav_identity_map.yaml",
+            default_identity_map_path(),
         )
 
         self.confirm_wait_s = float(

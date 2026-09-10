@@ -31,5 +31,10 @@
   </node>
 
   <node pkg="tcp_to_ros" type="gcs_a_calibration_node.py"
-        name="gcs_a_calibration" output="screen" required="true" />
+        name="gcs_a_calibration" output="screen" required="true">
+    <!-- implementation_plan_26091101 §3.3：校准集合与身份文件显式加载到本节点；
+         节点内置默认值不再作为生产部署的隐式配置来源。 -->
+    <rosparam command="load" file="$(find tcp_to_ros)/config/calibration_defaults.yaml" />
+    <param name="identity_file" value="$(arg map_file)" />
+  </node>
 </launch>

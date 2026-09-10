@@ -1,0 +1,23 @@
+<launch>
+  <!-- GCS_A 实机入口（implementation_plan_26091101 §5.1）：地面站本机默认 ROS Master
+       （11311）；bridge 加载实机生产 topology.yaml（hostname=GCS_A）；calibration 与
+       backend 同 Master；tcp_server 监听 0.0.0.0:39001 供 runtime JSON Lines 对接。
+       与仿真入口 topology_group_a_sim.launch 分离。 -->
+  <arg name="topology_config" default="$(find swarm_topology_bridge)/config/topology.yaml" />
+  <arg name="tcp_port" default="39001" />
+
+  <!-- 1. 实机 bridge（先于依赖远端 topic/service 的业务节点就绪） -->
+  <include file="$(find swarm_topology_bridge)/launch/bridge_group_a_real.launch">
+    <arg name="config" value="$(arg topology_config)" />
+    <arg name="uav_name" value="GCS_A" />
+  </include>
+
+  <!-- 2. 原点校准 + backend（calibration 参数见 gcs_a_backend.launch） -->
+  <include file="$(find tcp_to_ros)/launch/gcs_a_backend.launch" />
+
+  <!-- 3. TCP server（transport 默认来自 transport_defaults.yaml） -->
+  <node pkg="tcp_to_ros" type="tcp_server_node.py" name="tcp_server_node" output="screen">
+    <rosparam command="load" file="$(find tcp_to_ros)/config/transport_defaults.yaml" />
+    <param name="port" value="$(arg tcp_port)" />
+  </node>
+</launch>

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import math
 import unittest
+from types import SimpleNamespace
 
 from tcp_to_ros.calibration import (GlobalPoint, angular_error, circular_mean,
                                     headings_within, median_global,
-                                    task_point_to_local_enu, task_vector_to_enu)
+                                    task_point_to_local_enu, task_vector_to_enu,
+                                    validate_calibration_config)
 
 
 class CalibrationMathTest(unittest.TestCase):
@@ -35,6 +37,66 @@ class CalibrationMathTest(unittest.TestCase):
         self.assertAlmostEqual(x, 50.0)
         self.assertAlmostEqual(y, -17.5)
         self.assertAlmostEqual(z, 12.0)
+
+
+class CalibrationConfigTest(unittest.TestCase):
+    """implementation_plan_26091101 §3.1/§3.2：UAVn 校准集合启动校验。"""
+
+    @staticmethod
+    def _identities(targets, disabled=()):
+        return [SimpleNamespace(exec_target=name, enabled=name not in disabled)
+                for name in targets]
+
+    def test_accepts_required_subset(self):
+        calibration, known = validate_calibration_config(
+            ["UAV1", "UAV2", "UAV3"],
+            ["UAV1", "UAV2", "UAV3", "UAV4"],
+            self._identities(["UAV1", "UAV2", "UAV3", "UAV4"]))
+        self.assertEqual(calibration, ("UAV1", "UAV2", "UAV3"))
+        self.assertEqual(known, ("UAV1", "UAV2", "UAV3", "UAV4"))
+
+    def test_accepts_without_identity_file(self):
+        calibration, known = validate_calibration_config(["UAV1"], ["UAV1", "UAV2"])
+        self.assertEqual(calibration, ("UAV1",))
+        self.assertEqual(known, ("UAV1", "UAV2"))
+
+    def test_rejects_empty_sets(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config([], ["UAV1"])
+        with self.assertRaises(ValueError):
+            validate_calibration_config(["UAV1"], [])
+
+    def test_rejects_duplicates(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config(["UAV1", "UAV1"], ["UAV1"])
+        with self.assertRaises(ValueError):
+            validate_calibration_config(["UAV1"], ["UAV1", "UAV1"])
+
+    def test_rejects_calibration_outside_all(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config(["UAV2"], ["UAV1"])
+
+    def test_rejects_missing_identity_member(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config(["UAV1"], ["UAV1", "UAV2"],
+                                        self._identities(["UAV1"]))
+
+    def test_rejects_disabled_identity_member(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config(
+                ["UAV1"], ["UAV1", "UAV2"],
+                self._identities(["UAV1", "UAV2"], disabled=("UAV2",)))
+
+    def test_rejects_bad_or_duplicate_exec_target(self):
+        with self.assertRaises(ValueError):
+            validate_calibration_config(
+                ["UAV1"], ["UAV1"],
+                [SimpleNamespace(exec_target="", enabled=True)])
+        with self.assertRaises(ValueError):
+            validate_calibration_config(
+                ["UAV1"], ["UAV1"],
+                [SimpleNamespace(exec_target="UAV1", enabled=True),
+                 SimpleNamespace(exec_target="UAV1", enabled=True)])
 
 
 if __name__ == "__main__":

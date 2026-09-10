@@ -13,18 +13,29 @@ from std_msgs.msg import Bool, Float64
 from tf.transformations import euler_from_quaternion
 
 from tcp_to_ros.calibration import (GlobalPoint, circular_mean, headings_within,
-                                    median_global)
+                                    median_global, validate_calibration_config)
+from tcp_to_ros.identity import IdentityMap
 
 
 class GcsACalibrationNode:
     def __init__(self):
         self._lock = threading.RLock()
+        # 执行层 UAVn 身份（implementation_plan_26091101 §3.1）：calibration_uavs
+        # 决定参与采样/冻结的集合；all_uavs 仅用于 gp_origin_confirmed 记账与
+        # 逐机状态展示，不作为 ready 的全量阻塞门槛。~identity_map 仅作兼容
+        # （UAVn→topic 前缀），默认恒等；~identity_file 用于启动校验。
         self.calibration_uavs = tuple(rospy.get_param(
-            "~calibration_uavs", ["A%02d" % i for i in range(1, 7)]))
+            "~calibration_uavs", ["UAV%d" % i for i in range(1, 7)]))
         self.all_uavs = tuple(rospy.get_param(
-            "~all_uavs", ["A%02d" % i for i in range(1, 16)]))
-        self.identity = dict(rospy.get_param(
-            "~identity_map", {"A%02d" % i: "UAV%d" % i for i in range(1, 16)}))
+            "~all_uavs", ["UAV%d" % i for i in range(1, 17)]))
+        self.identity = dict(rospy.get_param("~identity_map", {}) or {})
+        identity_file = str(rospy.get_param("~identity_file", "") or "")
+        identities = IdentityMap.load(identity_file).uavs if identity_file else None
+        self.calibration_uavs, self.all_uavs = validate_calibration_config(
+            self.calibration_uavs, self.all_uavs, identities)
+        rospy.loginfo("calibration set=%s all_uavs=%d identity_file=%s",
+                      ",".join(self.calibration_uavs), len(self.all_uavs),
+                      identity_file or "(none)")
         self.sample_window_s = float(rospy.get_param("~sample_window_s", 2.0))
         self.min_samples = int(rospy.get_param("~min_samples_per_uav", 5))
         self.sample_max_age_s = float(rospy.get_param("~sample_max_age_s", 2.0))
@@ -46,7 +57,7 @@ class GcsACalibrationNode:
         self.ready_pub = rospy.Publisher("/group_a/calibration_ready", Bool, queue_size=1, latch=True)
         self.ready_pub.publish(Bool(False))
         for uav in self.all_uavs:
-            target = self.identity[uav]
+            target = self.identity.get(uav, uav)
             rospy.Subscriber("/%s/mavros/state" % target, State, self.on_state,
                              callback_args=uav, queue_size=10)
             rospy.Subscriber("/%s/gp_origin_confirmed" % target, Bool, self.on_confirmed,
@@ -112,14 +123,19 @@ class GcsACalibrationNode:
         per_uav_headings = [circular_mean(headings[uav]) for uav in self.calibration_uavs]
         reference = circular_mean(per_uav_headings)
         if not headings_within(per_uav_headings, reference, self.max_heading_error):
-            rospy.logerr_throttle(2.0, "calibration blocked: A01-A06 heading spread exceeds 30 degrees")
+            rospy.logerr_throttle(2.0, "calibration blocked: heading spread in %s exceeds %.0f degrees",
+                                  ",".join(self.calibration_uavs),
+                                  math.degrees(self.max_heading_error))
             return
         self.frozen_origin = median_global(per_uav_positions)
         self.frozen_heading = reference
         self._publish_origin(now)
         self.heading_pub.publish(Float64(reference))
         rospy.set_param("/group_a/frozen_reference_heading", reference)
-        rospy.loginfo("calibration frozen origin=(%.9f,%.9f,%.3f) heading=%.3f rad",
+        rospy.loginfo("calibration frozen from %s (heading gate %.0fdeg) "
+                      "origin=(%.9f,%.9f,%.3f) heading=%.3f rad",
+                      ",".join(self.calibration_uavs),
+                      math.degrees(self.max_heading_error),
                       self.frozen_origin.latitude, self.frozen_origin.longitude,
                       self.frozen_origin.altitude, reference)
 
@@ -144,11 +160,24 @@ class GcsACalibrationNode:
                 self._try_freeze(now)
                 return
             self._publish_origin(now)
-            if not self.ready and all(self.confirmed.values()):
-                self.ready = True
-                self.ready_pub.publish(Bool(True))
-                rospy.set_param("/group_a/calibration_ready", True)
-                rospy.loginfo("Group A calibration ready: 15/15 origins confirmed")
+            if not self.ready:
+                confirmed = [uav for uav in self.calibration_uavs
+                             if self.confirmed[uav]]
+                if len(confirmed) == len(self.calibration_uavs):
+                    self.ready = True
+                    self.ready_pub.publish(Bool(True))
+                    rospy.set_param("/group_a/calibration_ready", True)
+                    rospy.loginfo("Group A calibration ready: %d/%d required UAVs "
+                                  "confirmed (%s); tracking %d known UAVs",
+                                  len(confirmed), len(self.calibration_uavs),
+                                  ",".join(confirmed), len(self.all_uavs))
+                else:
+                    pending = [uav for uav in self.calibration_uavs
+                               if not self.confirmed[uav]]
+                    rospy.loginfo_throttle(5.0, "calibration ready pending UAVn: %s "
+                                           "(confirmed=%d/%d)",
+                                           ",".join(pending), len(confirmed),
+                                           len(self.calibration_uavs))
 
 
 def main():

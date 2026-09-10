@@ -1,6 +1,6 @@
 # Group A 任务层身份 -> 执行层身份映射
-# 任务层身份: A01 ... A15
-# 执行层身份: UAV1 ... UAV15 / hostname
+# 任务层身份: A01 ... A16（A16 为实机备用/替换身份）
+# 执行层身份: UAV1 ... UAV16 / hostname
 #
 # 注意: 本文件为待复核配置。正式实机使用前必须人工复核
 #       exec_target / hostname / ip 与现场实际一致。
@@ -29,3 +29,4 @@ uavs:
   - { uav_id: "A13", exec_target: "UAV13", hostname: "UAV13", ip: "192.168.5.131", enabled: true }
   - { uav_id: "A14", exec_target: "UAV14", hostname: "UAV14", ip: "192.168.5.141", enabled: true }
   - { uav_id: "A15", exec_target: "UAV15", hostname: "UAV15", ip: "192.168.5.151", enabled: true }
+  - { uav_id: "A16", exec_target: "UAV16", hostname: "UAV16", ip: "192.168.5.161", enabled: true }
