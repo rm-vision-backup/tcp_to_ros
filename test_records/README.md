@@ -26,6 +26,8 @@
 | `test_record_26090902.md` | 排程参数 1.3m/0.6mps + SLOW 1.5 档 prepare 五次复测：**4/5**（R2 A08/A09 实际 3D 破距） |
 | `test_record_26090919.md` | implementation_plan_26090900（direct BRAKE_HOLD）实施：单测 354/0/0；SITL 4 轮 0 SUCCESS（3 次真实 MIN_DISTANCE_BREACH → 组级 fan-out/10 机直锁实测） |
 | `test_record_26091000.md` | direct BRAKE_HOLD 实施后干净 stack 5 轮 prepare 复测：**4/5**（R4 首次 infra=tcp 39001 残留；R4 补测真 MIN_DISTANCE → 组级直锁 10 机端到端再实测） |
+| `test_record_26091103.md` | implementation_plan_26091101（实机部署适配）实施：自动测试 **367/0/0**；15-UAV prepare SITL **SUCCESS**（ticks=1648）；4 仓库 commits |
+| `test_record_26091114.md` | 26091101 实施后 5 轮 prepare 复测：**4/5**（R2 真 MIN_DISTANCE → 组级直锁 10 机）；新留档规则 `.ros_home_round<n>_<s\|f>` 验证通过 |
 
 > 记录命名 `test_record_yymmddhh.md`，时间后缀 = 文件生成时间；**实施状态以
 > `plans/README.md`「实施计划（现存）」表为唯一权威**，测试记录只存证据。
