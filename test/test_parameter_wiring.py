@@ -214,7 +214,15 @@ class ParameterWiringTest(unittest.TestCase):
         real_args = {item.get("name"): item.get("default", "")
                      for item in real.findall("arg")}
         self.assertIn("topology_config", real_args)
-        self.assertIn("fcu_url", real_args)
+        # FCU 链路（fcu_url / tgt_system）由机载 MAVROS launch 现场配置，实机入口不传。
+        self.assertNotIn("fcu_url", real_args)
+        self.assertNotIn("tgt_system", real_args)
+        mavros_includes = [item for item in real.findall("include")
+                           if item.get("file", "").endswith("mavros)/launch/px4.launch")]
+        self.assertEqual(len(mavros_includes), 1)
+        mavros_args = {arg.get("name") for arg in mavros_includes[0].findall("arg")}
+        self.assertNotIn("fcu_url", mavros_args)
+        self.assertNotIn("tgt_system", mavros_args)
         sim = ET.parse(str(exec_dir / "launch" / "uav_offboard_ego.launch")).getroot()
         sim_includes = [item.get("file", "") for item in sim.findall("include")]
         self.assertTrue(any("topology_group_a_sim.launch" in f for f in sim_includes))
