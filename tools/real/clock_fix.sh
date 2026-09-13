@@ -1,0 +1,277 @@
+#!/usr/bin/env bash
+# Fix the clock of the onboard companion computers (UAVn) from this host.
+#
+# 动作两步：1) 本机系统时钟 → 机载系统时钟；2) 机载系统时钟 → 机载 RTC。
+# 背景：机载无 NTP，上电后系统时钟停在 1970-01-01；RTC 未写入则重启又回 1970。
+# 必须在本轮启动 ROS 栈之前执行：real_setup.md §3.2 第 1 步、§5.1.1 第 0 步。
+#
+# Usage:
+#   clock_fix.sh [选项] <目标> [目标 ...]
+#   clock_fix.sh 1 2 4 11 16                    # 裸数字 = UAV1/2/4/11/16
+#   clock_fix.sh -n 1-6                         # 干跑 UAV1..UAV6
+#   clock_fix.sh -c tools/configs/clock_sync.env UAV7
+#
+# 目标写法：裸数字（1 2 4 11 16）或区间（1-6）= 无人机编号；也接受 UAVn、host、user@host。
+#
+# Options:
+#   -n          干跑：只打印将执行的远端脚本，不改任何时钟
+#   -c FILE     参数文件（默认 <tools>/configs/clock_sync.env）
+#   -t SEC      ssh 连接超时秒数（覆盖参数文件）
+#   -u USER     ssh 登录用户（覆盖参数文件）
+#   -h          本帮助
+#
+# 参数文件（机载账号/密码全机相同，模板见 configs/clock_sync.env.example）：
+#   BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS / SSH_TIMEOUT / TOLERANCE_S
+#   IP_PREFIX / IP_STRIDE / IP_OFFSET  →  UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)
+#
+# 退出码：0 全部成功；1 参数/配置/本机时钟错误；2 至少一台失败
+
+set -uo pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+DEFAULT_CONFIG="$SCRIPT_DIR/../configs/clock_sync.env"
+
+# —— 默认值（会被参数文件、环境变量、命令行依次覆盖）——
+BOARD_SSH_USER="${USER:-ubuntu}"
+BOARD_SSH_PASS=""
+BOARD_SUDO_PASS=""
+SSH_TIMEOUT=8
+TOLERANCE_S=2
+IP_PREFIX="192.168.5"
+IP_STRIDE=10
+IP_OFFSET=1
+RTC_CANDIDATES="/dev/rtc /dev/rtc0 /dev/rtc1"
+
+DRY_RUN=0
+CONFIG="$DEFAULT_CONFIG"
+
+# 环境变量优先级高于参数文件：先记下来，source 之后再放回
+env_user="${BOARD_SSH_USER:-}"
+env_pass="${BOARD_SSH_PASS:-}"
+env_sudopass="${BOARD_SUDO_PASS:-}"
+env_timeout="${SSH_TIMEOUT:-}"
+
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
+
+TARGETS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -n) DRY_RUN=1 ;;
+    -c) CONFIG="${2:-}"; shift ;;
+    -t) SSH_TIMEOUT="${2:-}"; shift ;;
+    -u) BOARD_SSH_USER="${2:-}"; shift ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
+    *) TARGETS+=("$1") ;;
+  esac
+  shift
+done
+
+if [ "${#TARGETS[@]}" -eq 0 ]; then
+  echo "ERROR: no target given (e.g. 1 2 4 11 16 or UAV7)" >&2
+  usage >&2
+  exit 1
+fi
+
+# —— 参数文件：不存在时明确报错（凭据不再散落在命令行/环境里）——
+if [ ! -f "$CONFIG" ]; then
+  echo "ERROR: config file not found: $CONFIG" >&2
+  echo "       cp $DEFAULT_CONFIG.example $DEFAULT_CONFIG && chmod 600 $DEFAULT_CONFIG" >&2
+  exit 1
+fi
+# shellcheck source=/dev/null
+. "$CONFIG"
+
+[ -n "$env_user" ] && BOARD_SSH_USER="$env_user"
+[ -n "$env_pass" ] && BOARD_SSH_PASS="$env_pass"
+[ -n "$env_sudopass" ] && BOARD_SUDO_PASS="$env_sudopass"
+[ -n "$env_timeout" ] && SSH_TIMEOUT="$env_timeout"
+
+if [ -z "${BOARD_SSH_USER:-}" ]; then
+  echo "ERROR: BOARD_SSH_USER not set in $CONFIG" >&2
+  exit 1
+fi
+
+# —— 本机时钟自检：把机载改成错的比不改更糟 ——
+NOW=$(date +%s)
+if [ "$NOW" -lt 1600000000 ]; then
+  echo "ERROR: local clock looks wrong (epoch=$NOW, $(date '+%F %T %Z'))." >&2
+  echo "       Fix this host clock first (e.g. sudo date -s '@<real epoch>')." >&2
+  exit 1
+fi
+# —— 目标展开：输出 "label ip [ssh_user]"（label 只用于打印）——
+# 裸数字 7 / 区间 1-6 / UAV7 / uav7 → UAVn，IP 由 IP_PREFIX/STRIDE/OFFSET 推出；
+# host、user@host 透传（user@host 只覆盖该台的 ssh 用户）。
+expand_targets() {
+  local t a b n num
+  for t in "$@"; do
+    case "$t" in
+      [0-9]*-[0-9]*)
+        a="${t%%-*}"; b="${t##*-}"
+        if ! [[ "$a" =~ ^[0-9]+$ && "$b" =~ ^[0-9]+$ ]]; then
+          echo "ERROR: bad range: $t" >&2; return 1
+        fi
+        if [ "$a" -gt "$b" ]; then
+          echo "ERROR: bad range (start > end): $t" >&2; return 1
+        fi
+        for ((n = a; n <= b; n++)); do
+          printf 'UAV%s %s.%s\n' "$n" "$IP_PREFIX" "$((IP_STRIDE * n + IP_OFFSET))"
+        done ;;
+      [0-9]*)
+        printf 'UAV%s %s.%s\n' "$t" "$IP_PREFIX" "$((IP_STRIDE * t + IP_OFFSET))" ;;
+      [Uu][Aa][Vv][0-9]*)
+        num="${t:3}"
+        if ! [[ "$num" =~ ^[0-9]+$ ]]; then echo "ERROR: bad UAV id: $t" >&2; return 1; fi
+        printf 'UAV%s %s.%s\n' "$num" "$IP_PREFIX" "$((IP_STRIDE * num + IP_OFFSET))" ;;
+      *@*@*)
+        echo "ERROR: bad target: $t" >&2; return 1 ;;
+      *@*)
+        printf '%s %s %s\n' "${t#*@}" "${t#*@}" "${t%%@*}" ;;
+      *)
+        printf '%s %s\n' "$t" "$t" ;;
+    esac
+  done
+}
+
+# 先展开一次：区间/编号写法在此处校验，错了直接退出，不进 ssh 流程
+TARGET_LINES=$(expand_targets "${TARGETS[@]}") || exit 1
+
+# —— 远端脚本（bash；经 base64 传输，密码等特殊字符不经过 ssh 命令行）——
+remote_script() {
+  local epoch="$1" pass="$2" rtc="$3" pass_b64 rtc_b64
+  pass_b64=$(printf '%s' "$pass" | base64 -w0)
+  rtc_b64=$(printf '%s' "$rtc" | base64 -w0)
+  cat <<REMOTE
+set -u
+epoch=$epoch
+sudo_pass_b64=$pass_b64
+rtc_b64=$rtc_b64
+pass=\$(printf '%s' "\$sudo_pass_b64" | base64 -d)
+rtc_candidates=\$(printf '%s' "\$rtc_b64" | base64 -d)
+
+rtc_dev=''
+for d in \$rtc_candidates; do [ -e "\$d" ] && rtc_dev="\$d" && break; done
+
+sudo_rc=0
+if [ -n "\$pass" ]; then
+  printf '%s\n' "\$pass" | sudo -S -v >/dev/null 2>&1 || sudo_rc=\$?
+else
+  sudo -n -v >/dev/null 2>&1 || sudo_rc=\$?
+fi
+
+sys_before=\$(date +%s)
+sys_rc=90
+if [ "\$sudo_rc" -eq 0 ]; then
+  if sudo -n date -s "@\$epoch" >/dev/null 2>&1; then sys_rc=0; else sys_rc=\$?; fi
+fi
+sys_after=\$(date +%s)
+sys_str=\$(date '+%F %T %Z')
+
+rtc_rc=90
+if [ "\$sudo_rc" -ne 0 ]; then
+  rtc_rc=90
+elif [ -z "\$rtc_dev" ]; then
+  rtc_rc=91
+else
+  if sudo -n hwclock --systohc >/dev/null 2>&1; then rtc_rc=0; else rtc_rc=\$?; fi
+fi
+
+rtc_before=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
+[ -z "\$rtc_before" ] && rtc_before=n/a
+rtc_after=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
+[ -z "\$rtc_after" ] && rtc_after=n/a
+rtc_epoch=\$(date -d "\$rtc_after" +%s 2>/dev/null || echo n/a)
+[ -z "\$rtc_epoch" ] && rtc_epoch=n/a
+tze=\$(timedatectl show -p Timezone --value 2>/dev/null || echo n/a)
+syncp=\$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo n/a)
+adj=\$( [ -f /etc/adjtime ] && tail -1 /etc/adjtime 2>/dev/null || echo none )
+
+echo "sudo_rc=\$sudo_rc"
+echo "sys_rc=\$sys_rc"
+echo "rtc_rc=\$rtc_rc"
+echo "sys_before=\$sys_before"
+echo "sys_after=\$sys_after"
+echo "sys_str=\$sys_str"
+echo "rtc_dev=\$rtc_dev"
+echo "rtc_epoch=\$rtc_epoch"
+echo "tz=\$tze"
+echo "ntp_sync=\$syncp"
+echo "adjtime=\$adj"
+echo "rtc_before=\$rtc_before"
+echo "rtc_after=\$rtc_after"
+REMOTE
+}
+
+# —— ssh 执行：一次连接跑完全部动作，不做交互提示 ——
+run_remote() {
+  local ip="$1" b64="$2" user="${3:-$BOARD_SSH_USER}"
+  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout="$SSH_TIMEOUT" -o NumberOfPasswordPrompts=1 \
+      -o PreferredAuthentications=password,keyboard-interactive,publickey \
+      "${user}@${ip}" "echo $b64 | base64 -d | bash" 2>&1
+}
+
+val() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
+
+# —— 主流程 ——
+status=0
+printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
+       TARGET SYS_DELTA SYS_TIME RTC_TIME RTC_DEV RTC_DELTA RESULT
+printf '%s\n' "------------------------------------------------------------------------------------------------------"
+
+while read -r label ip tuser; do
+  [ -n "${label:-}" ] || continue
+  remote=$(remote_script "$NOW" "$BOARD_SUDO_PASS" "$RTC_CANDIDATES")
+  b64=$(printf '%s' "$remote" | base64 -w0)
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '%-14s %s\n' "$label" "DRY-RUN ${tuser:+$tuser@}$ip: set system clock to $NOW ($(date '+%F %T %Z')), then hwclock --systohc"
+    continue
+  fi
+
+  out=$(run_remote "$ip" "$b64" "$tuser")
+
+  sudo_rc=$(val sudo_rc "$out"); sys_rc=$(val sys_rc "$out"); rtc_rc=$(val rtc_rc "$out")
+  sys_before=$(val sys_before "$out"); sys_after=$(val sys_after "$out")
+  sys_str=$(val sys_str "$out")
+  rtc_dev=$(val rtc_dev "$out"); rtc_epoch=$(val rtc_epoch "$out")
+  rtc_before=$(val rtc_before "$out"); rtc_after=$(val rtc_after "$out")
+  adjtime=$(val adjtime "$out")
+
+  if [ -z "$sys_after" ]; then
+    err=$(grep -v -e '^[a-z_]*=' -e '^Warning: Permanently added' <<<"$out" | head -1)
+    printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
+           "$label" "-" "-" "-" "-" "-" "FAIL(unreachable: ${err:-empty reply})"
+    status=2
+    continue
+  fi
+
+  sys_delta=$((sys_after - sys_before))
+  sys_delta_abs=${sys_delta#-}
+  rtc_delta="n/a"
+  if [[ "$rtc_epoch" =~ ^[0-9]+$ ]]; then rtc_delta=$((rtc_epoch - sys_after)); fi
+
+  result="PASS"
+  if [ "$sys_rc" != "0" ]; then
+    result="FAIL(system clock: sudo_rc=$sudo_rc sys_rc=$sys_rc)"
+  elif [ "$sys_delta_abs" -gt "$TOLERANCE_S" ]; then
+    result="FAIL(system clock off by ${sys_delta}s)"
+  elif [ "$rtc_rc" -eq 91 ]; then
+    result="WARN(no RTC device: reboot resets to 1970)"
+  elif [ "$rtc_rc" != "0" ]; then
+    result="FAIL(rtc write: rtc_rc=$rtc_rc)"
+  elif [ "$rtc_delta" != "n/a" ] && [ "${rtc_delta#-}" -gt "$TOLERANCE_S" ]; then
+    result="FAIL(rtc off by ${rtc_delta}s)"
+  fi
+
+  printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
+         "$label" "${sys_delta}s" "${sys_str}" "${rtc_after}" "${rtc_dev:-none}" "${rtc_delta}s" "$result"
+  echo "    rtc_before=${rtc_before} adjtime=${adjtime}"
+
+  case "$result" in
+    PASS|WARN*) ;;
+    *) status=2 ;;
+  esac
+done <<<"$TARGET_LINES"
+
+exit "$status"

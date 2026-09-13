@@ -1,4 +1,4 @@
-# tools：实机运维工具（飞控 ulog 取件 / 离线分析 / 板钟对时）
+# tools：实机运维工具（飞控 ulog 取件 / 离线分析 / 时钟修正）
 
 > 位置：`src/tcp_to_ros/tools/`（地面站侧仓库，随 `tcp_to_ros` 一起克隆到 GCS_A / 开发机）。
 > 这些脚本**不是 ROS 节点**：不参与 `catkin build` 安装（`CMakeLists.txt` 只装 `scripts/`），
@@ -23,7 +23,8 @@ pip3 install --user pymavlink pyulog     # 实测：pymavlink 2.4.41、pyulog 1.
 | `fcu/nsh_fcu.py` | 跑**只读** PX4 nsh 命令（`ls` / `mount` / `param show ...`），走 `SERIAL_CONTROL` |
 | `ulog/ulog_zcheck.py` | ulog 快照：时长、local/global 位置、`actuator_armed`、`nav_state`、offboard 控制模式 |
 | `ulog/ulog_cmds.py` | ulog 内 `vehicle_command` 汇总，解码 `SET_GPS_GLOBAL_ORIGIN(48)` |
-| `real/board_time_sync.sh` | 从本机给机载电脑板钟对时（治「上电/重启回 1970」） |
+| `real/clock_fix.sh` | 时钟修正：本机系统时钟 →（多次指定）机载系统时钟 → 机载 RTC（治「上电/重启回 1970」） |
+| `configs/clock_sync.env.example` | 时钟修正参数文件模板（机载账号/密码全机相同，只记一份） |
 
 ## 2. `fcu/`：直连飞控取件
 
@@ -70,20 +71,40 @@ python3 src/tcp_to_ros/tools/ulog/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
   日志尚未开始记录 → 查不到不等于没注入。
 - 交叉校验（可选）：`ulog_info <log>.ulg` 看 `duration` 与 `No Dropouts`，用来判取件完整性。
 
-## 4. `real/`：板钟对时
+## 4. `real/`：时钟修正（本机 → 机载系统时钟 → 机载 RTC）
+
+机载无 NTP：上电/重启后系统时钟停在 `1970-01-01`；若 RTC 从未写入（或板子没有 RTC），重启又会回到 1970。
+`clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
+**② 机载系统时钟 → 机载 RTC**（`sudo hwclock --systohc`，设备按 `RTC_CANDIDATES` 探测）。
+两步都回读复核（`|Δ| ≤ TOLERANCE_S` 才 PASS），并可**一轮批量修多台**。
 
 ```bash
-# 先看：不同时执行，-n 只打印命令
-./src/tcp_to_ros/tools/real/board_time_sync.sh -n -u ubuntu UAV7
+# 首次：把参数文件建好（含明文密码，已 gitignore，别提交/别 push）
+cp src/tcp_to_ros/tools/configs/clock_sync.env.example \
+   src/tcp_to_ros/tools/configs/clock_sync.env && chmod 600 src/tcp_to_ros/tools/configs/clock_sync.env
+$EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS
 
-# 真对：本机取 epoch → 远端 sudo date -s → 回读复核（|Δ| ≤ 2 s 判 PASS）
-BOARD_SUDO_PASS=<机载 sudo 密码> ./src/tcp_to_ros/tools/real/board_time_sync.sh -u ubuntu UAV7 UAV8
+# 干跑：只打印，不改任何时钟
+./src/tcp_to_ros/tools/real/clock_fix.sh -n 1 2 4 11 16
+
+# 真修：一次修 1 2 4 11 16 五台（凭据从参数文件读，不在命令行里）
+./src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16
 ```
 
-- **必须在启动 ROS 栈之前跑**：对时前启动的进程，其日志时间戳仍是 1970 基（`real_setup.md` §5.1.1 第 0 步）。
-- 环境变量：`BOARD_SSH_PASS`（ssh 密码，不设则走密钥/agent）、`BOARD_SUDO_PASS`（远端 sudo 密码，不设则要求免密 `sudo -n`）。
-- 目标写法：`UAVn`（自动解析为 `192.168.5.(10n+1)`）、或 `host`、或 `user@host`。
-- 本机时钟先自检：`epoch < 1.6e9` 直接拒绝执行（避免把机载对成错的）。
+- **目标写法**：裸数字 = 无人机编号（`1 2 4 11 16` → UAV1/2/4/11/16）；也支持区间 `1-6`、`UAV7`、`uav7`、
+  `host`、`user@host`（后者只覆盖该台的 ssh 用户）。
+- 选项：`-n` 干跑、`-c FILE` 换参数文件、`-t SEC` ssh 超时、`-u USER` 覆盖 ssh 用户。
+- 输出：`TARGET / SYS_DELTA / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`；
+  `PASS` 全对齐；`WARN(no RTC device: reboot resets to 1970)` = 系统时钟已修但板子无 RTC；
+  `FAIL(...)` 带 `sudo_rc/sys_rc/rtc_rc` 便于定位（本机时钟早于 2020 直接拒绝执行）。
+- 退出码：`0` 全部成功；`1` 参数/配置/本机时钟错；`2` 至少一台失败。
+- **必须在启动 ROS 栈之前跑**：修正前启动的进程，其日志时间戳仍是 1970 基（`real_setup.md` §5.1.1 第 0 步）。
+- 参数文件（`configs/clock_sync.env`，机载账号/密码全机相同，**只记一份**）：
+  `BOARD_SSH_USER` / `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` / `TOLERANCE_S` /
+  `RTC_CANDIDATES` / `IP_PREFIX` / `IP_STRIDE` / `IP_OFFSET`（`UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)`）。
+  环境变量 `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` 优先级高于参数文件。
+  `BOARD_SUDO_PASS` 留空 = 机载免密 sudo（脚本改用 `sudo -n`）。
+- 密码经 stdin 交给 `sudo -S`，远端脚本整体 base64 传输，密码里的空格/引号/`$` 不会破坏命令（已实测）。
 
 ## 5. 踩过的坑（先读再动手）
 
@@ -91,8 +112,10 @@ BOARD_SUDO_PASS=<机载 sudo 密码> ./src/tcp_to_ros/tools/real/board_time_sync
    `wait_heartbeat()` 会把它当成目标 → 必须 `MAV_TARGET=<飞控 sys:comp>`（实测 UAV7 = `7:1`）。
 2. **`LOG_ENTRY` 空列表 ≠ 卡里没日志**：实测同一天 18:37 返回空列表（`mavftp list` 还超时），
    19:06 同一条链路列出 65 条 → 先重启/重试再判卡坏。
-3. **板钟不跨重启**：每次上电回 1970（`timedatectl`：`System clock synchronized: no`），
-   本轮 ROS 日志时间戳不可用；此时 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）是唯一真实时刻锚点。
+3. **板钟不跨重启**：每次上电回 1970（`timedatectl`：`System clock synchronized: no`）。
+   用 `clock_fix.sh` 修完系统时钟后还要**写进 RTC**（`hwclock --systohc`）才可能跨重启；
+   若 `RESULT` 报 `WARN(no RTC device …)` 说明该板没有可用 RTC，只能每次上电重跑修正。
+   本轮未修正时 ROS 日志时间戳不可用；此时 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）是唯一真实时刻锚点。
 4. **下载慢**：实测 ≈1.8 MB/min（3 MB ≈ 2.5 min）；日志里出现 `stall` 重试属正常。
 5. **同一文件可能跨时钟基**：现场 `~/.tmp/px4_multi.log` 同进程内从 `[8616.83]` 跳到
    `[1789296434.52]`（对时瞬间）→ **不能用文件 mtime 反推事件时刻**。
@@ -101,7 +124,7 @@ BOARD_SUDO_PASS=<机载 sudo 密码> ./src/tcp_to_ros/tools/real/board_time_sync
 
 ## 6. 与文档/记录的关系
 
-- 部署与启动流程：`src/swarm_uav_interfaces/real_setup.md`（§3.2 对时、§5.1.1 第 0 步核板钟、§8 日志与证据）。
+- 部署与启动流程：`src/swarm_uav_interfaces/real_setup.md`（§3.2 时钟修正、§5.1.1 第 0 步核板钟、§8 日志与证据）。
 - 一轮实测的完整取件记录（UAV7，2026-09-13）：`src/tcp_to_ros/test_records/` 对应记录、
   归档目录示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/`（含 `md5sums.txt`）。
 - 工程验证脚本（ego_smoke、acceptance、plot）另有落点：工作区 `verification/`（不入 git），与本目录职责不同。

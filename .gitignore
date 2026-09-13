@@ -1,2 +1,6 @@
 __pycache__/
 *.py[cod]
+
+# 时钟修正参数文件含机载明文密码：只提交 .example 模板
+tools/configs/clock_sync.env
+tools/configs/*.local.env
