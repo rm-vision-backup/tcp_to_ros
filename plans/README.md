@@ -96,6 +96,7 @@ GCS_A 必须：
 | `implementation_plan_26090900.md` | runtime/当前任务 UAV 集群 brake hold：TCP HOLD 诚实失败语义 + 目标过滤；单机安全终态→同任务参与者 fan-out 直接 BRAKE_HOLD（预测判据+replan 余地，仅参与者，去 EMERGENCY_BRAKE） | **已实施（2026-09-09，自动测试 354/0/0；SITL 组级直锁路径实测但 prepare SUCCESS 未达成，见 状态-26090900）** |
 | `implementation_plan_26091002.md` | 紧急邻机复用与 yield 锁存键修正：统一 `emergency_peer_id_`/`primary_peer`，锁存键加入邻机身份 | **不实施（2026-09-10 评估）：§3.2 非重要问题（锁存键漏让路有 BRAKE_HOLD 兜底）；§3.1 设计理念不同、非必要（几何 right-of-way 判据为有意设计）** |
 | `implementation_plan_26091101.md` | 原点校准集合参数化与实机多主部署适配：实机 topology、GCS_A/机载启动、MAVROS 与 Startup Applications 接线审计 | **已实施（2026-09-11，自动测试 367/0/0；15-UAV prepare SITL SUCCESS ticks=1648，见 test_record_26091103）** |
+| `implementation_plan_26091316.md` | `ego_planner_driver` 基于起始位姿反馈的 5m 闭环软起飞：锁存起点、限速参考、反馈稳定到达后 HOLD | **暂不执行（2026-09-13 评估，计划正文保留）**：真因已定位并解决——2026-09-11 实机起飞 setpoint/thrust 震荡为开机自启动程序 `offb_hover.py` 与我方 `setpoint_relay` 双发布者争抢 `/mavros/setpoint_raw/local`，**非**开环斜坡所致；清除外部发布者后实机 5m 软起飞实测正常。见 §状态-26091316 |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
 > 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
@@ -255,20 +256,18 @@ GCS_A 必须：
 
 ## 文档索引
 
+> 本索引只用于定位文档，**不复述实施状态**：实施计划的唯一状态记录在「实施计划（现存）」表，
+> 历史/决策记录在对应 `## 状态-<yymmddhh>` 段。计划类文档不在本索引逐条重复，避免同一计划
+> 在 README 出现两处状态记录。
+
 | 路径 | 内容 |
 |---|---|
 | `plans/README.md`（本文件） | Phase 编号、设计规约、计划索引、当前状态 |
-| `plans/implementation_plan_26082500.md` | 预测式制动安全门禁、首次 intent 协商与确定性主动让路（已撤回，L3 精简） |
-| `plans/implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan（已实施） |
-| `plans/implementation_plan_26082621.md` | plan-exec 循环重构 + 单一 replan 入口 + EMERGENCY 走 replan（方案 Y，已实施） |
-| `plans/implementation_plan_26082722.md` | 轨迹末端 OOM 最终修复：真实 `[0,T]` 有界采样、资源边界、single-QR 与回归验收（已实施 2026-08-28） |
-| `plans/implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计（已实施 2026-08-29，见 §状态-26082916） |
-| `plans/implementation_plan_26082415.md` | min-snap 统一单段重构（历史） |
-| `plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
+| `plans/implementation_plan_*.md` | 全部实施计划（含 `26082300`…`26091316`）：见上表「实施计划（现存）」，状态以该表为准 |
 | `test_records/test_record_26082300.md` / `26082400.md` / `26082421.md` | 方案 B prepare / PVA 链路 / intent 时间契约审计记录 |
 | `test_records/test_record_26082501.md` | 预测避碰阶段 A 实施与自动测试记录 |
 | `test_records/test_record_26082602.md` / `26082621.md` / `26082700.md` | 26082602 / 26082621 / prepare 15 机全 active 与软着陆修复记录 |
-| `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁（本记录） |
+| `test_records/test_record_26082722.md` | 轨迹末端 OOM 修复：有界采样、single-QR、PlanResult 分流与内存门禁 |
 | `test_records/test_record_26082916.md` | 参数配置整理与规范化：canonical YAML、接线、校验、flock 清理与回归记录 |
 | `test_records/test_record_26090106.md` | t_off 启动时序协调：排程器单元 + GCS 集成测试记录（仿真验收未执行） |
 | `test_records/test_record_26090722.md` | prepare 五次干净重启验收（schedule_safety_margin_m=1.0，d_ij=2.0m）：4/5 通过 |
@@ -410,5 +409,38 @@ GCS_A 必须：
   曾试 0.6 后按指示改回 0.7（`a2d0544`）与 SLOW 1.5 档的 prepare 五次复测 **4/5**
   （R2 A08/A09+UAV6 实际 3D 0.778–0.966m 破 1m 门禁），见 `test_records/test_record_26090902.md`。
 - **代码提交**：ego `c772e96`、executor `a5e4a02`、tcp `29d779b`（backend）+ `9894052`（TCP）。
+
+## 状态-26091316：软起飞"开环"计划暂不执行，真因为双发布者争抢 setpoint（2026-09-13 评估）
+
+- **决策**：`implementation_plan_26091316.md`（锁存起点 + 限速参考 + 实测稳定到达后 HOLD）
+  **暂不执行**，计划正文保留为可复查备选（不用"撤回"语义）；该计划状态只在「实施计划（现存）」表记录，
+  本文档说明依据，`implementation_plan_26091316.md` 顶部仅保留指向本段的横幅。
+- **真因（2026-09-11 UAV6 带桨实机，已定位并解决）**：开机自启动程序 `offb_hover.py`
+  （GNOME autostart `formation_follow.sh.desktop` → `roslaunch mavros px4_multi.launch` + 脚本，
+  与我方 launch 内嵌 mavros 同绑 `udp://:15500@`）与我方 `setpoint_relay` **同时发布
+  `/mavros/setpoint_raw/local`**，我方 mavros 把两路都转发给 PX4：位置目标在 1.24 m 锁存点与
+  `start+5m` 之间来回跳，`vehicle_attitude_setpoint.yaw_body` 20 Hz A/B 交替、电机 0.00↔0.99，
+  操作员随后切 POSCTL 并 kill。证据（master.log 双 PUB 行 + `offb_hover.py` 源码行号 + `log_137`
+  双簇/斜坡/震荡分析）见 `.tmp/notes/flight_260911_log137_setpoint_fight_260913.md` §1。
+- **结论依据**：单纯按时间发布平滑位置斜坡**不会**让 PX4 setpoint/thrust 剧烈震荡，震荡来自
+  "同一控制器输入被两路替换"。本文档所述"TAKEOFF 完成判据按时间/指令而非实测"确为缺陷，
+  但**不是**该次异常主因 ⇒ 用户决策暂不执行。
+- **验证（2026-09-13 UAV6 会话）**：清除外部发布者后，master 侧 `/mavros/setpoint_raw/local`
+  只有 `/setpoint_relay` 一个发布者（无 `offb_hover`）；`uav_offboard_ego_real.launch` 记录
+  `TAKEOFF started from z=3.08, target z=8.08` → `TAKEOFF complete at z=8.08`；PX4 `log_143`
+  `actuator_armed` 126/128、`nav_state` 以 14(OFFBOARD) 为主、`vehicle_local_position.z`
+  3.07 →（t+10 s）峰值 8.71 → 悬停 7.98–8.14 →（t+60 s）4.11（收栈后下降）。
+  取证归档 `~/Downloads/flight_logs/UAV6_2026-09-13_1756/`（PX4 ulog + `.ros_home` ROS 日志 +
+  终端转录；`md5sums.txt` 逐字节校验；目录名取 PX4 机内 `/fs/microsd/log/2026-09-13/09_56_50.ulg`
+  UTC → 本地 17:56，不采用机载 1970 板钟）。
+- **仍未完成（安全项；未获授权不执行）**：① 机上永久关闭该开机自启动项
+  （`~/.config/autostart/formation_follow.sh.desktop` → `X-GNOME-Autostart-enabled=false`）与
+  每次飞行前清理清单（`pkill -f offb_hover.py` / `roslaunch mavros px4_multi.launch` /
+  `mavros_node`）；② `setpoint_relay` 单发布者 fail-fast 自检、arm 前"存在外部 setpoint 发布者即拒飞"
+  preflight gate 目前只有 docstring 声明，无运行期校验。
+- **本计划暂不执行的直接含义**：TAKEOFF 仍按指令高度/时间判完成 ⇒ "实测未离地"不会自动阻止进入
+  HOLD；现场门禁须按此设防（PREPARE/START 前确认实际高度），或复活本计划后由代码补齐。
+- **复活条件**：出现"实测未上升但 planner 已判 TAKEOFF 完成并进入 HOLD"的可复现事故，或需要在
+  无桨/半实物台上保证起飞完成判据与实测一致时，按 `implementation_plan_26091316.md` 原方案实施。
 
 
