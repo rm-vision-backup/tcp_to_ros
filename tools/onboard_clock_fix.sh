@@ -6,21 +6,21 @@
 # 必须在本轮启动 ROS 栈之前执行：real_setup.md §3.2 第 1 步、§5.1.1 第 0 步。
 #
 # Usage:
-#   clock_fix.sh [选项] <目标> [目标 ...]
-#   clock_fix.sh 1 2 4 11 16                    # 裸数字 = UAV1/2/4/11/16
-#   clock_fix.sh -n 1-6                         # 干跑 UAV1..UAV6
-#   clock_fix.sh -c tools/configs/clock_sync.env UAV7
+#   onboard_clock_fix.sh [选项] <目标> [目标 ...]
+#   onboard_clock_fix.sh 1 2 4 11 16                    # 裸数字 = UAV1/2/4/11/16
+#   onboard_clock_fix.sh -n 1-6                         # 干跑 UAV1..UAV6
+#   onboard_clock_fix.sh -c tools/configs/onboard.env UAV7
 #
 # 目标写法：裸数字（1 2 4 11 16）或区间（1-6）= 无人机编号；也接受 UAVn、host、user@host。
 #
 # Options:
 #   -n          干跑：只打印将执行的远端脚本，不改任何时钟
-#   -c FILE     参数文件（默认 <tools>/configs/clock_sync.env）
+#   -c FILE     参数文件（默认 <tools>/configs/onboard.env）
 #   -t SEC      ssh 连接超时秒数（覆盖参数文件）
 #   -u USER     ssh 登录用户（覆盖参数文件）
 #   -h          本帮助
 #
-# 参数文件（机载账号/密码全机相同，模板见 configs/clock_sync.env.example）：
+# 参数文件（机载账号/密码全机相同，模板见 configs/onboard.env.example）：
 #   BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS / SSH_TIMEOUT / TOLERANCE_S
 #   IP_PREFIX / IP_STRIDE / IP_OFFSET  →  UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)
 #
@@ -29,7 +29,7 @@
 set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-DEFAULT_CONFIG="$SCRIPT_DIR/../configs/clock_sync.env"
+DEFAULT_CONFIG="$SCRIPT_DIR/configs/onboard.env"
 
 # —— 默认值（会被参数文件、环境变量、命令行依次覆盖）——
 BOARD_SSH_USER="${USER:-ubuntu}"

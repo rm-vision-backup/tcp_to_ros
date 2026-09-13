@@ -9,26 +9,32 @@
 
 ```bash
 pip3 install --user pymavlink pyulog     # 实测：pymavlink 2.4.41、pyulog 1.1.0（python3.8）
-sudo apt install sshpass                 # 可选：机载 ssh 用密码（无密钥）时 `fetch_logs.sh` 自动用它
+sudo apt install sshpass                 # 可选：机载 ssh 用密码（无密钥）时 `log_fetch.sh` 自动用它
 ```
 
 - 只用 `pymavlink`（与飞控通话）和 `pyulog`（读 `.ulg`），**不依赖 ROS**，无需 `source devel/setup.bash`。
 - `pyulog` 另提供 `ulog_info` / `ulog2csv`（装在 `~/.local/bin`），可做交叉校验。
 
-## 1. 目录
+## 1. 文件清单（平铺在 `tools/` 根下 + 前缀命名）
 
-| 路径 | 用途 |
+命名约定：**前缀说清「碰谁」**——`log_*` = 一轮取件总入口；`fcu_*` = 走 MAVLink **直连飞控**（在线）；
+`onboard_*` = **ssh 到机载电脑**（在线）；`ulog_*` = 读 `.ulg` **文件**（离线，不碰链路）。
+`.py` 用 `python3` 跑、`.sh` 用 `bash` 跑；除 `configs/` 外没有子目录。
+
+| 文件 | 用途 |
 |---|---|
-| `logs/fetch_logs.sh` | **日志下载（推荐入口）**：一轮收全飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录 |
-| `fcu/ulog_list_fcu.py` | 列飞控 SD 上的 ulog 清单（`LOG_REQUEST_LIST`），并把 `time_utc` 换算成本地时刻 |
-| `fcu/ulog_fetch_fcu.py` | 下载 ulog（`LOG_REQUEST_DATA` 分块 + 断点续传 + 进度 + stall 重试） |
-| `fcu/nsh_fcu.py` | 跑**只读** PX4 nsh 命令（`ls` / `mount` / `param show ...`），走 `SERIAL_CONTROL` |
-| `ulog/ulog_zcheck.py` | ulog 快照：时长、local/global 位置、`actuator_armed`、`nav_state`、offboard 控制模式 |
-| `ulog/ulog_cmds.py` | ulog 内 `vehicle_command` 汇总，解码 `SET_GPS_GLOBAL_ORIGIN(48)` |
-| `real/clock_fix.sh` | 时钟修正：本机系统时钟 →（多次指定）机载系统时钟 → 机载 RTC（治「上电/重启回 1970」） |
-| `configs/clock_sync.env.example` | 机载账号/密码 + IP 规则模板（`clock_fix.sh` 与 `fetch_logs.sh` **共用同一份**） |
+| `log_fetch.sh` | **日志下载（推荐入口）**：一轮收全飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录 |
+| `fcu_ulog_list.py` | 列飞控 SD 上的 ulog 清单（`LOG_REQUEST_LIST`），并把 `time_utc` 换算成本地时刻 |
+| `fcu_ulog_fetch.py` | 下载 ulog（`LOG_REQUEST_DATA` 分块 + 断点续传 + 进度 + stall 重试） |
+| `fcu_nsh.py` | 跑**只读** PX4 nsh 命令（`ls` / `mount` / `param show ...`），走 `SERIAL_CONTROL`；**不在下载链里**（见 §3.1） |
+| `ulog_zcheck.py` | ulog 快照：时长、local/global 位置、`actuator_armed`、`nav_state`、offboard 控制模式 |
+| `ulog_cmds.py` | ulog 内 `vehicle_command` 汇总，解码 `SET_GPS_GLOBAL_ORIGIN(48)` |
+| `onboard_clock_fix.sh` | 时钟修正：本机系统时钟 →（多次指定）机载系统时钟 → 机载 RTC（治「上电/重启回 1970」） |
+| `configs/onboard.env.example` | 机载账号/密码 + IP 规则模板（`onboard_clock_fix.sh` 与 `log_fetch.sh` **共用同一份**） |
+| `configs/onboard.env` | 上者的本地实参（含明文密码，已 gitignore；别提交、别 push） |
 
-## 2. `logs/fetch_logs.sh`：日志下载（一轮收全，推荐入口）
+
+## 2. `log_fetch.sh`：日志下载（一轮收全，推荐入口）
 
 一轮实机测试的日志散在三处，本脚本一把收齐。**本轮范围（最小档）**：
 
@@ -46,19 +52,19 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 
 ```bash
 # 收 UAV7：最新 1 条 ulog + 机载日志
-LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/logs/fetch_logs.sh 7
+LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/log_fetch.sh 7
 
 # 多台：每台取最新 3 条 ulog（脚本内部串行，见 §6 坑 6）
-LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/logs/fetch_logs.sh -n 3 1 2 6 14
+LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/log_fetch.sh -n 3 1 2 6 14
 
 # 机载 ssh 不通时只收飞控
-./src/tcp_to_ros/tools/logs/fetch_logs.sh -s -n 1 7
+./src/tcp_to_ros/tools/log_fetch.sh -s -n 1 7
 ```
 
 | 选项 | 默认 | 说明 |
 |---|---|---|
 | `-n N` | `1` | 每台取最新 N 条 ulog；`0` = 只列清单不下载 |
-| `-c FILE` | `configs/clock_sync.env` | 参数文件（与 `clock_fix.sh` 共用机载凭据/编址） |
+| `-c FILE` | `configs/onboard.env` | 参数文件（与 `onboard_clock_fix.sh` 共用机载凭据/编址） |
 | `-t SEC` / `-u USER` | 参数文件值 | ssh 连接超时 / ssh 登录用户 |
 | `-s` | — | 跳过机载阶段（只收飞控 ulog） |
 
@@ -86,7 +92,7 @@ $LOG_OUT/UAV7_2026-09-14_1900/
   否则退回密钥 / 交互输入。
 - 退出码：`0` 全部成功；`1` 参数/配置错；`2` 至少一台有 `FAIL` 项。
 
-## 3. `fcu/`：飞控 ulog（底层工具，`fetch_logs.sh` 内部也用它们）
+## 3. `fcu_*.py`：MAVLink 直连飞控（底层工具，`log_fetch.sh` 内部调 list/fetch）
 
 链路：开发机 / GCS_A ──UDP `:15500`── 机载 `mavlink-routerd` ──串口 921600── 飞控。
 **所有机载 routerd 都往同一个 `:15500` 推**，所以必须用 `-t` 钉住目标：routerd 自己也会发一路
@@ -94,34 +100,54 @@ $LOG_OUT/UAV7_2026-09-14_1900/
 
 ```bash
 # 列清单（-t 必填：裸数字 = UAVn；也可写显式 7:1）
-python3 src/tcp_to_ros/tools/fcu/ulog_list_fcu.py -t 7 -n 12
+python3 src/tcp_to_ros/tools/fcu_ulog_list.py -t 7 -n 12
 
 # 下载：LOG_OUT=<落盘目录> -t 7（无 id → 最新 -n 条；有 id → 按 id，半截文件原地续传）
 LOG_OUT=~/Downloads/flight_logs/UAV7_2026-09-14_1900/fcu \
-  python3 src/tcp_to_ros/tools/fcu/ulog_fetch_fcu.py -t 7 -n 2
-LOG_OUT=<同上> python3 src/tcp_to_ros/tools/fcu/ulog_fetch_fcu.py -t 7 62 63 64
+  python3 src/tcp_to_ros/tools/fcu_ulog_fetch.py -t 7 -n 2
+LOG_OUT=<同上> python3 src/tcp_to_ros/tools/fcu_ulog_fetch.py -t 7 62 63 64
 
 # 只读查板卡状态（不会写盘、不改参数）
-python3 src/tcp_to_ros/tools/fcu/nsh_fcu.py -t 7 'ls /fs/microsd' 'mount' 'param show SDLOG_MODE'
+python3 src/tcp_to_ros/tools/fcu_nsh.py -t 7 'ls /fs/microsd' 'mount' 'param show SDLOG_MODE'
 ```
 
 | 参数 | 默认 | 说明 |
 |---|---|---|
 | `-t N` | 无（**必填**） | 裸数字 = UAVn（`-t 7` 等价 `7:1`）；也接受显式 `sys:comp` |
-| `-n LAST` | list `12` / fetch `2` | `ulog_list_fcu.py`：打印最新 N 行，`0` = 全表；`ulog_fetch_fcu.py`：无 id 时取最新 N 条 |
-| `LOG_OUT` | 当前目录 | **唯一环境变量**（`ulog_fetch_fcu.py` 落盘目录） |
-| id … | — | `ulog_fetch_fcu.py` 位置参数：显式 ulog id（已下满的 skip） |
+| `-n LAST` | list `12` / fetch `2` | `fcu_ulog_list.py`：打印最新 N 行，`0` = 全表；`fcu_ulog_fetch.py`：无 id 时取最新 N 条 |
+| `LOG_OUT` | 当前目录 | **唯一环境变量**（`fcu_ulog_fetch.py` 落盘目录） |
+| id … | — | `fcu_ulog_fetch.py` 位置参数：显式 ulog id（已下满的 skip） |
 
 - MAVLink 源（`udpin:0.0.0.0:15500`）、`CHUNK_TIMEOUT`（1.0 s）、`STALL_LIMIT`（6）、`CHUNK_COUNT`（65535）
   都是脚本内常量：**不传参、不设环境变量**。
 - 退出码：`0` 正常；`2` 未收到 `LOG_ENTRY`（链路/目标不对，或飞控侧 SD 读取异常）；
   `3` 有日志没下完（SHORT，已下载部分保留，可原地续传）。
 
-## 4. `ulog/`：离线分析
+### 3.1 `fcu_nsh.py` 单独干什么（**不在**下载链上）
+
+`log_fetch.sh` 只调 `fcu_ulog_list.py` / `fcu_ulog_fetch.py`，**从不调 nsh**；三个脚本之间也没有 import
+（各自独立起 pymavlink 连接）。`fcu_nsh.py` 是飞控侧**独立取证**工具：当 ulog 列不出/下不动（怀疑卡坏、
+分区没挂、参数被改），或要核固件与板载状态时，直接开一条 nsh 问飞控。
 
 ```bash
-python3 src/tcp_to_ros/tools/ulog/ulog_zcheck.py <ULOG_DIR>/log_64.ulg
-python3 src/tcp_to_ros/tools/ulog/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
+# 卡挂没挂、ulog 写不写得进（SDLOG_MODE=1 才是开机自动记录）
+python3 src/tcp_to_ros/tools/fcu_nsh.py -t 7 'ls /fs/microsd' 'mount' 'param show SDLOG_MODE' 'ver'
+# 启动异常看开机 dmesg（SD 卡报错常落在这里）
+python3 src/tcp_to_ros/tools/fcu_nsh.py -t 7 'dmesg' 'free'
+```
+
+- nsh = **NuttShell**（PX4 跑在 NuttX 上，飞控控制台上那个 `nsh>` 就是它）；命令按 nsh 语法写，不是 Linux。
+- 走 `SERIAL_CONTROL` 的 `DEV_SHELL`，flags 带 `EXCLUSIVE` → **独占会话**：同一时刻别的 MAVLink console
+  （如 QGC 的 MAVLink Console）进不来；跑完工具会补发一帧释放 shell。
+- 一次给多条命令会**依次**发，每条收满「链路静默 2 s」为止 → 输出混在一起时拆成单条跑。
+- 心跳过滤要求 `-t` 指定的 sysid 且 `autopilot == 12`（PX4）→ 避开 routerd 自己发的 `autopilot=8`。
+- **只准读**：nsh 写命令（`param set` / `mkfs` / `reboot`）没有二次确认，此工具不做。
+
+## 4. `ulog_*.py`：离线分析（只读 `.ulg` 文件，不连任何链路）
+
+```bash
+python3 src/tcp_to_ros/tools/ulog_zcheck.py <ULOG_DIR>/log_64.ulg
+python3 src/tcp_to_ros/tools/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
 ```
 
 - `ulog_zcheck.py`：一行式快照，用来判「有没有 arm / 有没有进 OFFBOARD / 位置是相对原点还是绝对偏移」。
@@ -131,24 +157,24 @@ python3 src/tcp_to_ros/tools/ulog/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
   日志尚未开始记录 → 查不到不等于没注入。
 - 交叉校验（可选）：`ulog_info <log>.ulg` 看 `duration` 与 `No Dropouts`，用来判取件完整性。
 
-## 5. `real/`：时钟修正（本机 → 机载系统时钟 → 机载 RTC）
+## 5. `onboard_clock_fix.sh`：时钟修正（本机 → 机载系统时钟 → 机载 RTC）
 
 机载无 NTP：上电/重启后系统时钟停在 `1970-01-01`；若 RTC 从未写入（或板子没有 RTC），重启又会回到 1970。
-`clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
+`onboard_clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
 **② 机载系统时钟 → 机载 RTC**（`sudo hwclock --systohc`，设备按 `RTC_CANDIDATES` 探测）。
 两步都回读复核（`|Δ| <= TOLERANCE_S` 才 PASS），并可**一轮批量修多台**。
 
 ```bash
 # 首次：把参数文件建好（含明文密码，已 gitignore，别提交/别 push）
-cp src/tcp_to_ros/tools/configs/clock_sync.env.example \
-   src/tcp_to_ros/tools/configs/clock_sync.env && chmod 600 src/tcp_to_ros/tools/configs/clock_sync.env
-$EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS
+cp src/tcp_to_ros/tools/configs/onboard.env.example \
+   src/tcp_to_ros/tools/configs/onboard.env && chmod 600 src/tcp_to_ros/tools/configs/onboard.env
+$EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS
 
 # 干跑：只打印，不改任何时钟
-./src/tcp_to_ros/tools/real/clock_fix.sh -n 1 2 4 11 16
+./src/tcp_to_ros/tools/onboard_clock_fix.sh -n 1 2 4 11 16
 
 # 真修：一次修 1 2 4 11 16 五台（凭据从参数文件读，不在命令行里）
-./src/tcp_to_ros/tools/real/clock_fix.sh 1 2 4 11 16
+./src/tcp_to_ros/tools/onboard_clock_fix.sh 1 2 4 11 16
 ```
 
 - **目标写法**：裸数字 = 无人机编号（`1 2 4 11 16` → UAV1/2/4/11/16）；也支持区间 `1-6`、`UAV7`、`uav7`、
@@ -159,12 +185,12 @@ $EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / B
   `FAIL(...)` 带 `sudo_rc/sys_rc/rtc_rc` 便于定位（本机时钟早于 2020 直接拒绝执行）。
 - 退出码：`0` 全部成功；`1` 参数/配置/本机时钟错；`2` 至少一台失败。
 - **必须在启动 ROS 栈之前跑**：修正前启动的进程，其日志时间戳仍是 1970 基（`real_setup.md` §5.1.1 第 0 步）。
-- 参数文件（`configs/clock_sync.env`，机载账号/密码全机相同，**只记一份**；`fetch_logs.sh` 也读它）：
+- 参数文件（`configs/onboard.env`，机载账号/密码全机相同，**只记一份**；`log_fetch.sh` 也读它）：
   `BOARD_SSH_USER` / `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` / `TOLERANCE_S` /
   `RTC_CANDIDATES` / `IP_PREFIX` / `IP_STRIDE` / `IP_OFFSET`（`UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)`）。
   环境变量 `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` 优先级高于参数文件。
   `BOARD_SUDO_PASS` 留空 = 机载免密 sudo（脚本改用 `sudo -n`）。
-  注：`BOARD_SSH_PASS` 只喂远端 sudo；ssh 本身走密钥/交互 —— `fetch_logs.sh` 额外支持装了 `sshpass` 时用它。
+  注：`BOARD_SSH_PASS` 只喂远端 sudo；ssh 本身走密钥/交互 —— `log_fetch.sh` 额外支持装了 `sshpass` 时用它。
 - 密码经 stdin 交给 `sudo -S`，远端脚本整体 base64 传输，密码里的空格/引号/`$` 不会破坏命令（已实测）。
 
 ## 6. 踩过的坑（先读再动手）
@@ -174,21 +200,21 @@ $EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / B
 2. **`LOG_ENTRY` 空列表 ≠ 卡里没日志**：实测同一天 18:37 返回空列表（`mavftp list` 还超时），
    19:06 同一条链路列出 65 条 → 先重启/重试再判卡坏。
 3. **板钟不跨重启**：每次上电回 1970（`timedatectl`：`System clock synchronized: no`）。
-   用 `clock_fix.sh` 修完系统时钟后还要**写进 RTC**（`hwclock --systohc`）才可能跨重启；
+   用 `onboard_clock_fix.sh` 修完系统时钟后还要**写进 RTC**（`hwclock --systohc`）才可能跨重启；
    若 `RESULT` 报 `WARN(no RTC device …)` 说明该板没有可用 RTC，只能每次上电重跑修正。
    本轮未修正时 ROS 日志时间戳不可用；此时 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）是唯一真实时刻锚点。
-   `fetch_logs.sh` 会把这个事实写进归档目录的 `README.md`（板钟告警行）。
+   `log_fetch.sh` 会把这个事实写进归档目录的 `README.md`（板钟告警行）。
 4. **下载慢**：实测 ≈1.8 MB/min（3 MB ≈ 2.5 min）；日志里出现 `stall` 重试属正常。
 5. **同一文件可能跨时钟基**：现场旧 `px4_multi.launch` 的旁路日志 `~/.tmp/px4_multi.log` 同进程内从
    `[8616.83]` 跳到 `[1789296434.52]`（对时瞬间）→ **不能用文件 mtime 反推事件时刻**。
    该 launch 与其日志属旧用法（当前机载入口不用、也不采集），这里只借它说明现象；
    本工作区自己的 ROS 日志同样以 1970 为基点，真时刻一律回到 ulog 的 `LOG_ENTRY.time_utc`。
 6. **多台别同时下 ulog**：`:15500` 是所有机载 routerd 共用的一个端口，`LOG_REQUEST_DATA` 的分块会互相
-   抢带宽、交错错序 → 必须一台一台串行（`fetch_logs.sh` 已串行；手工跑时也要注意）。
-7. **旧笔记里的 env 写法已作废**：2026-09-14 起 `MAV_TARGET` / `MAV_SRC` / `LAST` / `ULOG_OUT` 全部改成
-   命令行参数（只保留 `LOG_OUT`）。`.tmp/notes/…`、`test_records/…` 里
-   `MAV_TARGET=7:1 ULOG_OUT=<dir> python3 ulog_fetch_fcu.py` 这类命令照抄会失败 →
-   换成 `LOG_OUT=<dir> python3 ulog_fetch_fcu.py -t 7`。脚本名仍保留 `_fcu` 后缀，旧记录里「用哪个脚本」仍可对。
+   抢带宽、交错错序 → 必须一台一台串行（`log_fetch.sh` 已串行；手工跑时也要注意）。
+7. **旧笔记里的命令写法已作废**（两层原因）：① 2026-09-14 起 `MAV_TARGET` / `MAV_SRC` / `LAST` / `ULOG_OUT`
+   全部改成命令行参数（只保留 `LOG_OUT`）；② 同日起工具按 §1 的平铺 + 前缀改名（见 §7.1 对照表）。
+   `.tmp/notes/…`、`test_records/…` 里 `MAV_TARGET=7:1 ULOG_OUT=<dir> python3 ulog_fetch_fcu.py` 这类命令
+   照抄必然失败 → 换成 `LOG_OUT=<dir> python3 src/tcp_to_ros/tools/fcu_ulog_fetch.py -t 7`。
 
 ## 7. 与文档/记录的关系
 
@@ -197,5 +223,23 @@ $EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / B
   归档目录示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/`（含 `md5sums.txt`）；
   现场笔记与一次性脚本已归档 `.tmp/archive_260913/`（`uav7_260913/` 部署/取件/实测三份 + `log_dl_stub_test/` 桩测试）；
   目录名规则 `UAVn_<YYYY-MM-DD_HHMM>` 与归档先例 `UAV6-260911-1930`、`UAV6_2026-09-13_1756` 不同，
-  **新归档以 `fetch_logs.sh` 生成的形状为准**（旧目录保留原样，不回改）。
+  **新归档以 `log_fetch.sh` 生成的形状为准**（旧目录保留原样，不回改）。
 - 工程验证脚本（ego_smoke、acceptance、plot）另有落点：工作区 `verification/`（不入 git），与本目录职责不同。
+
+### 7.1 改名对照（2026-09-14，C 方案：平铺 + 前缀）
+
+| 旧路径 | 现在 |
+|---|---|
+| `logs/fetch_logs.sh` | `log_fetch.sh` |
+| `fcu/ulog_list_fcu.py` | `fcu_ulog_list.py` |
+| `fcu/ulog_fetch_fcu.py` | `fcu_ulog_fetch.py` |
+| `fcu/nsh_fcu.py` | `fcu_nsh.py` |
+| `ulog/ulog_zcheck.py` | `ulog_zcheck.py` |
+| `ulog/ulog_cmds.py` | `ulog_cmds.py` |
+| `real/clock_fix.sh` | `onboard_clock_fix.sh` |
+| `configs/clock_sync.env` / `.env.example` | `configs/onboard.env` / `configs/onboard.env.example` |
+
+- 历史记录（`.tmp/notes/…`、`test_records/…`、`.tmp/archive_260913/`）**保留旧名不回改**；
+  照抄前先对照本表。`tools/configs/onboard.env` 仍被 gitignore（含明文密码）。
+- 行为不变：只改名 + 改默认配置路径（`-c` 可照旧覆盖）；两套离线桩测试（`.tmp/clock_fix_stub_test/`、
+  `.tmp/archive_260913/log_dl_stub_test/`）都在新名下重跑通过。

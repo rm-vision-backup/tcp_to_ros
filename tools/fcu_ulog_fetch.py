@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Fetch PX4 ULogs from the FCU over MAVLink into $LOG_OUT.
 
-Usage:  LOG_OUT=<dir> ulog_fetch_fcu.py -t N [-n LAST] [log_id ...]
+Usage:  LOG_OUT=<dir> fcu_ulog_fetch.py -t N [-n LAST] [log_id ...]
 
   -t N       UAV number, or explicit "sys:comp":  -t 7 = UAV7 = 7:1   (required)
   -n LAST    with no log_id: take the newest LAST entries            (default 2)

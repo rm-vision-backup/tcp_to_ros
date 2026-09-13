@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Run read-only PX4 nsh (NSH shell) commands over MAVLink SERIAL_CONTROL.
 
-Usage:  nsh_fcu.py -t N "ls /fs/microsd" "mount" ...
+Usage:  fcu_nsh.py -t N "ls /fs/microsd" "mount" ...
 
   -t N      UAV number, or explicit "sys:comp":  -t 7 = UAV7 = 7:1   (required)
 

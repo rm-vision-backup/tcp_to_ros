@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """List PX4 ULog entries on the FCU over MAVLink (mavlink-routerd export).
 
-Usage:  ulog_list_fcu.py -t N [-n LAST]
+Usage:  fcu_ulog_list.py -t N [-n LAST]
 
   -t N      UAV number, or explicit "sys:comp":  -t 7 = UAV7 = 7:1   (required)
   -n LAST   print only the newest LAST entries; 0 = the whole table  (default 12)

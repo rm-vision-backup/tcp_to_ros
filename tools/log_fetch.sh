@@ -5,15 +5,15 @@
 # 不收：systemd journal、nsh 快照、本机 GCS 侧日志、旧 launch 旁路日志（机上 ~/.tmp/*.log，如 px4_multi.log）。
 #   范围与理由见 tools/README.md §2「本轮不收」；时间基陷阱见 §6 坑 5。
 # Usage:
-#   fetch_logs.sh [选项] <目标> [目标 ...]
-#   fetch_logs.sh 7                                  # 收 UAV7
-#   fetch_logs.sh -n 3 1 2 6 14                      # 每台取最新 3 条 ulog
-#   LOG_OUT=~/Downloads/flight_logs fetch_logs.sh 1 2 6 14
+#   log_fetch.sh [选项] <目标> [目标 ...]
+#   log_fetch.sh 7                                  # 收 UAV7
+#   log_fetch.sh -n 3 1 2 6 14                      # 每台取最新 3 条 ulog
+#   LOG_OUT=~/Downloads/flight_logs log_fetch.sh 1 2 6 14
 # 目标写法：裸数字（7）= UAVn，同时定飞控 MAVLink（sys=n, comp=1）与本机推 IP 规则
 #   （IP_PREFIX.IP_STRIDE*n+IP_OFFSET）；也接受 UAV7、uav7、区间 1-6、host、user@host。
 # Options:
 #   -n N      每台取最新 N 条 ulog（默认 1；0 = 只列清单不下载）
-#   -c FILE   参数文件（默认 <tools>/configs/clock_sync.env：机载账号/密码 + IP 规则）
+#   -c FILE   参数文件（默认 <tools>/configs/onboard.env：机载账号/密码 + IP 规则）
 #   -t SEC    ssh 连接超时秒数（覆盖参数文件）
 #   -u USER   ssh 登录用户（覆盖参数文件）
 #   -s        跳过机载阶段（只收飞控 ulog）
@@ -26,8 +26,7 @@ set -uo pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 TOOLS_DIR=$(cd "$SCRIPT_DIR/.." && pwd)
-FCU_DIR="$TOOLS_DIR/fcu"
-DEFAULT_CONFIG="$TOOLS_DIR/configs/clock_sync.env"
+DEFAULT_CONFIG="$TOOLS_DIR/configs/onboard.env"
 LOG_OUT="${LOG_OUT:-$PWD}"
 CAP_BYTES=$((32 * 1024 * 1024))   # 大文件（planner / 终端转录）上限：超了取尾部（硬编码，不做开关）
 
@@ -239,7 +238,7 @@ emit_readme() {   # $1 label $2 ip $3 mav $4 ssh_user $5 host $6 epoch $7 date
   if [[ "$epoch" =~ ^[0-9]+$ ]] && [ "$epoch" -lt 1600000000 ]; then
     warn="
 ⚠ **机载板钟未修正**（epoch=$epoch）→ $label 上的 ROS 日志时间戳不可用；
-   请以 \`fcu/ulog_list.txt\` 的 GPS UTC（utc+8 列）为准（先跑 tools/real/clock_fix.sh）。"
+   请以 \`fcu/ulog_list.txt\` 的 GPS UTC（utc+8 列）为准（先跑 tools/onboard_clock_fix.sh）。"
   fi
   cat <<EOF
 # 日志归档 ${label}_${STAMP}
@@ -363,7 +362,7 @@ while read -r label ip tuser mavg; do
   else
     printf -- '-- 飞控：列 ulog 清单（MAVLink %s）\n' "$mavg"
     lrc=0
-    python3 "$FCU_DIR/ulog_list_fcu.py" -t "$mavg" -n 0 >"$out/fcu/ulog_list.txt" 2>&1 || lrc=$?
+    python3 "$TOOLS_DIR/fcu_ulog_list.py" -t "$mavg" -n 0 >"$out/fcu/ulog_list.txt" 2>&1 || lrc=$?
     if [ "$lrc" -ne 0 ]; then
       printf 'FAIL|mavlink|fcu/ulog_list.txt|-|-|rc=%d: no LOG_ENTRY (link/target wrong, or FCU cannot read SD)\n' \
              "$lrc" >>"$out/.notes"
@@ -379,10 +378,10 @@ while read -r label ip tuser mavg; do
     if [ "${#ids[@]}" -gt 0 ]; then
       printf -- '-- 飞控：下 ulog %s\n' "${ids[*]}"
       frc=0
-      LOG_OUT="$out/fcu" python3 "$FCU_DIR/ulog_fetch_fcu.py" -t "$mavg" "${ids[@]}" \
+      LOG_OUT="$out/fcu" python3 "$TOOLS_DIR/fcu_ulog_fetch.py" -t "$mavg" "${ids[@]}" \
         >"$out/fcu/ulog_fetch.log" 2>&1 || frc=$?
       if [ "$frc" -ne 0 ]; then
-        printf 'FAIL|mavlink|fcu/log_*.ulg|-|-|ulog_fetch_fcu.py rc=%d: see fcu/ulog_fetch.log\n' \
+        printf 'FAIL|mavlink|fcu/log_*.ulg|-|-|fcu_ulog_fetch.py rc=%d: see fcu/ulog_fetch.log\n' \
                "$frc" >>"$out/.notes"
       fi
       for i in "${ids[@]}"; do
