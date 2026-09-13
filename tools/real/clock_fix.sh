@@ -152,6 +152,10 @@ rtc_candidates=\$(printf '%s' "\$rtc_b64" | base64 -d)
 rtc_dev=''
 for d in \$rtc_candidates; do [ -e "\$d" ] && rtc_dev="\$d" && break; done
 
+# 写入前先取 RTC 现状（作为「修之前是否停在 1970」的证据）
+rtc_before=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
+[ -z "\$rtc_before" ] && rtc_before=n/a
+
 sudo_rc=0
 if [ -n "\$pass" ]; then
   printf '%s\n' "\$pass" | sudo -S -v >/dev/null 2>&1 || sudo_rc=\$?
@@ -176,8 +180,6 @@ else
   if sudo -n hwclock --systohc >/dev/null 2>&1; then rtc_rc=0; else rtc_rc=\$?; fi
 fi
 
-rtc_before=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
-[ -z "\$rtc_before" ] && rtc_before=n/a
 rtc_after=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
 [ -z "\$rtc_after" ] && rtc_after=n/a
 rtc_epoch=\$(date -d "\$rtc_after" +%s 2>/dev/null || echo n/a)
@@ -266,7 +268,7 @@ while read -r label ip tuser; do
 
   printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
          "$label" "${sys_delta}s" "${sys_str}" "${rtc_after}" "${rtc_dev:-none}" "${rtc_delta}s" "$result"
-  echo "    rtc_before=${rtc_before} adjtime=${adjtime}"
+  echo "    sys_before=${sys_before} rtc_before=${rtc_before} adjtime=${adjtime}"
 
   case "$result" in
     PASS|WARN*) ;;
