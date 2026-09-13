@@ -241,5 +241,5 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
 
 - 历史记录（`.tmp/notes/…`、`test_records/…`、`.tmp/archive_260913/`）**保留旧名不回改**；
   照抄前先对照本表。`tools/configs/onboard.env` 仍被 gitignore（含明文密码）。
-- 行为不变：只改名 + 改默认配置路径（`-c` 可照旧覆盖）；两套离线桩测试（`.tmp/clock_fix_stub_test/`、
+- 行为不变：只改名 + 改默认配置路径（`-c` 可照旧覆盖）；两套离线桩测试（`.tmp/archive_260913/clock_fix_stub_test/`、
   `.tmp/archive_260913/log_dl_stub_test/`）都在新名下重跑通过。
