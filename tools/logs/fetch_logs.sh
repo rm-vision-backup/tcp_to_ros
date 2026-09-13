@@ -2,7 +2,8 @@
 # 日志下载：一轮把一台（或多台）UAV 的日志收到本机（飞控 ulog + 机载 ROS / 终端日志）。
 # 采集范围（本轮定稿的最小档）：① 飞控 PX4 ulog（MAVLink，固定 UDP :15500）+ ulog 全清单；
 # ② 机载 .ros_home/log/<最新 session>/、runtime_logs/ego_planner/*、.tmp/logs/*_offboard_ego.log。
-# 不收：systemd journal、nsh 快照、本机 GCS 侧日志（范围与理由见 tools/README.md §3）。
+# 不收：systemd journal、nsh 快照、本机 GCS 侧日志、旧 launch 旁路日志（机上 ~/.tmp/*.log，如 px4_multi.log）。
+#   范围与理由见 tools/README.md §2「本轮不收」；时间基陷阱见 §6 坑 5。
 # Usage:
 #   fetch_logs.sh [选项] <目标> [目标 ...]
 #   fetch_logs.sh 7                                  # 收 UAV7

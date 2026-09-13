@@ -40,7 +40,9 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 | 机载 | `onboard/term/*_offboard_ego.log`（终端全量转录，§5.1.2 方式 B） | ssh：`~/catkin_swarm6-2/.tmp/logs/` |
 
 **本轮不收**（有意跳过）：systemd journal（`journalctl -u swarm-uav-onboard.service`）、nsh 快照（需要时按 §3 手动跑）、
-本机 GCS_A 侧 `.ros_home`。理由：机载终端转录已盖住启动链输出；journal 需现场确认免密读权限；GCS 侧日志按需另收。
+本机 GCS_A 侧 `.ros_home`、**旧 launch 的旁路日志**（机上 `~/.tmp/*.log`，如 `px4_multi.log`、`offb_hover*.log`：
+那是早期可用性测试用的 `px4_multi.launch` / 悬停脚本留下的，当前机载入口 `uav_offboard_ego_real.launch` 不产生）。
+理由：机载终端转录已盖住启动链输出；journal 需现场确认免密读权限；GCS 侧与非当前入口的旁路日志按需另收。
 
 ```bash
 # 收 UAV7：最新 1 条 ulog + 机载日志
@@ -177,8 +179,10 @@ $EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / B
    本轮未修正时 ROS 日志时间戳不可用；此时 ulog 的 `LOG_ENTRY.time_utc`（GPS UTC）是唯一真实时刻锚点。
    `fetch_logs.sh` 会把这个事实写进归档目录的 `README.md`（板钟告警行）。
 4. **下载慢**：实测 ≈1.8 MB/min（3 MB ≈ 2.5 min）；日志里出现 `stall` 重试属正常。
-5. **同一文件可能跨时钟基**：现场 `~/.tmp/px4_multi.log` 同进程内从 `[8616.83]` 跳到
-   `[1789296434.52]`（对时瞬间）→ **不能用文件 mtime 反推事件时刻**。
+5. **同一文件可能跨时钟基**：现场旧 `px4_multi.launch` 的旁路日志 `~/.tmp/px4_multi.log` 同进程内从
+   `[8616.83]` 跳到 `[1789296434.52]`（对时瞬间）→ **不能用文件 mtime 反推事件时刻**。
+   该 launch 与其日志属旧用法（当前机载入口不用、也不采集），这里只借它说明现象；
+   本工作区自己的 ROS 日志同样以 1970 为基点，真时刻一律回到 ulog 的 `LOG_ENTRY.time_utc`。
 6. **多台别同时下 ulog**：`:15500` 是所有机载 routerd 共用的一个端口，`LOG_REQUEST_DATA` 的分块会互相
    抢带宽、交错错序 → 必须一台一台串行（`fetch_logs.sh` 已串行；手工跑时也要注意）。
 7. **旧笔记里的 env 写法已作废**：2026-09-14 起 `MAV_TARGET` / `MAV_SRC` / `LAST` / `ULOG_OUT` 全部改成
@@ -191,6 +195,7 @@ $EDITOR src/tcp_to_ros/tools/configs/clock_sync.env     # 填 BOARD_SSH_USER / B
 - 部署与启动流程：`src/swarm_uav_interfaces/real_setup.md`（§3.2 时钟修正、§5.1.1 第 0 步核板钟、§8 日志与证据）。
 - 一轮实测的完整取件记录（UAV7，2026-09-13）：`src/tcp_to_ros/test_records/` 对应记录、
   归档目录示例 `~/Downloads/flight_logs/UAV7_2026-09-13_1900/`（含 `md5sums.txt`）；
+  现场笔记与一次性脚本已归档 `.tmp/archive_260913/`（`uav7_260913/` 部署/取件/实测三份 + `log_dl_stub_test/` 桩测试）；
   目录名规则 `UAVn_<YYYY-MM-DD_HHMM>` 与归档先例 `UAV6-260911-1930`、`UAV6_2026-09-13_1756` 不同，
   **新归档以 `fetch_logs.sh` 生成的形状为准**（旧目录保留原样，不回改）。
 - 工程验证脚本（ego_smoke、acceptance、plot）另有落点：工作区 `verification/`（不入 git），与本目录职责不同。
