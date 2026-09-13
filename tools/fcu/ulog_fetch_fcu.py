@@ -1,32 +1,47 @@
 #!/usr/bin/env python3
-"""Fetch PX4 ULogs from the FCU over MAVLink, selecting the autopilot target.
+"""Fetch PX4 ULogs from the FCU over MAVLink into $LOG_OUT.
 
-Usage:  ULOG_OUT=<dir> python3 ulog_fetch_fcu.py [log_id ...]   (default: newest 2)
-Env:    MAV_SRC (default udpin:0.0.0.0:15500), CHUNK_TIMEOUT (idle s before re-request),
-        STALL_LIMIT (consecutive idle rounds before giving up), LAST (default ids to take)
+Usage:  LOG_OUT=<dir> ulog_fetch_fcu.py -t N [-n LAST] [log_id ...]
+
+  -t N       UAV number, or explicit "sys:comp":  -t 7 = UAV7 = 7:1   (required)
+  -n LAST    with no log_id: take the newest LAST entries            (default 2)
+  log_id ... explicit ids; a file already complete is skipped, a partial file is
+             resumed in place (LOG_REQUEST_DATA from its current byte offset)
+
+$LOG_OUT is the only environment variable (default: current directory); the MAVLink
+source (:15500) and the chunk timeout / stall limit are fixed constants below.
+
+Exit: 0 all done; 2 no LOG_ENTRY received (link/target wrong, or the FCU cannot
+      read the SD — retry/power-cycle the FCU before blaming the card).
 """
+import argparse
 import os
 import sys
 import time
 
 from pymavlink import mavutil
 
-SRC = os.environ.get('MAV_SRC', 'udpin:0.0.0.0:15500')
-OUT = os.environ.get('ULOG_OUT', os.getcwd())
-CHUNK_TIMEOUT = float(os.environ.get('CHUNK_TIMEOUT', '1.0'))
-STALL_LIMIT = int(os.environ.get('STALL_LIMIT', '6'))
-COUNT = int(os.environ.get('CHUNK_COUNT', '65535'))
-LAST = int(os.environ.get('LAST', '2'))
-# Pin the autopilot explicitly (e.g. MAV_TARGET=7:1); mavlink-routerd also emits its
-# own heartbeat (autopilot=8), which the auto-detect loop can otherwise latch onto.
-TARGET = os.environ.get('MAV_TARGET', '')
+# --- fixed link/chunking constants (deliberately not configurable) ---
+SRC = 'udpin:0.0.0.0:15500'   # onboard mavlink-routerd forwards the FCU link here
+CHUNK_TIMEOUT = 1.0           # s of silence before re-requesting the same chunk
+STALL_LIMIT = 6               # consecutive silent rounds before giving up
+COUNT = 65535                 # bytes asked per LOG_REQUEST_DATA
+HB_TIMEOUT = 8.0              # s to watch heartbeats before listing
+LIST_TIMEOUT = 6.0            # s of silence after the last LOG_ENTRY
 
-os.makedirs(OUT, exist_ok=True)
-m = mavutil.mavlink_connection(SRC)
+OUT = os.environ.get('LOG_OUT') or os.getcwd()
 
 
-def watch_heartbeats(seconds=8.0):
-    """Collect heartbeat sources; PX4 autopilot answers on its own system id."""
+def parse_target(text):
+    """'7' -> (7, 1); '7:1' -> (7, 1). PX4 autopilot component id is 1."""
+    parts = str(text).split(':')
+    ts = int(parts[0])
+    tc = int(parts[1]) if len(parts) > 1 else 1
+    return ts, tc
+
+
+def watch_heartbeats(m, seconds):
+    """Report heartbeat sources on :15500 (all powered boards plus the routerd)."""
     seen = {}
     t_end = time.time() + seconds
     while time.time() < t_end:
@@ -41,27 +56,27 @@ def watch_heartbeats(seconds=8.0):
     return seen
 
 
-def list_entries(ts, tc, timeout=6.0):
+def list_entries(m, ts, tc):
     entries = {}
     m.mav.log_request_list_send(ts, tc, 0, 0xffff)
-    t_end = time.time() + timeout
+    t_end = time.time() + LIST_TIMEOUT
     while time.time() < t_end:
         msg = m.recv_match(type='LOG_ENTRY', blocking=True, timeout=1)
         if msg is None:
             continue
-        if TARGET and (msg.get_srcSystem(), msg.get_srcComponent()) != (ts, tc):
+        if (msg.get_srcSystem(), msg.get_srcComponent()) != (ts, tc):
             continue
         entries[int(msg.id)] = msg
-        t_end = time.time() + timeout
+        t_end = time.time() + LIST_TIMEOUT
     return entries
 
 
-def fetch(ts, tc, lid, size):
+def fetch(m, ts, tc, lid, size):
     path = os.path.join(OUT, 'log_%d.ulg' % lid)
     offset = os.path.getsize(path) if os.path.exists(path) else 0
     if size and offset >= size:
         print('skip id=%d already %d bytes' % (lid, offset), flush=True)
-        return
+        return True
     print('--- id=%d size=%d start@%d -> %s' % (lid, size, offset, path), flush=True)
     stall, t0, reported = 0, time.time(), 0
     with open(path, 'ab' if offset else 'wb') as fh:
@@ -94,37 +109,49 @@ def fetch(ts, tc, lid, size):
             if stall >= STALL_LIMIT:
                 break
     got = os.path.getsize(path)
+    complete = (not size) or got >= size
     print('done id=%d -> %d bytes in %.0fs%s'
-          % (lid, got, time.time() - t0, '' if (not size or got >= size)
-             else '  !! SHORT (expected %d)' % size), flush=True)
+          % (lid, got, time.time() - t0,
+             '' if complete else '  !! SHORT (expected %d)' % size), flush=True)
+    return complete
 
 
-cands = watch_heartbeats()
-entries, target = {}, None
-if TARGET:
-    ts, tc = (int(x) for x in TARGET.split(':'))
-    entries = list_entries(ts, tc)
-    if entries:
-        target = (ts, tc)
-else:
-    for ts, tc in [(s, c) for s, c in sorted(cands.items())] + [(0, 0)]:
-        entries = list_entries(ts, tc)
-        if entries:
-            target = (ts, tc)
-            break
-if not entries:
-    print('NO ENTRIES RECEIVED', flush=True)
-    sys.exit(2)
+def main():
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument('-t', '--target', required=True,
+                    help='UAV number (7 = UAV7) or explicit sys:comp (7:1)')
+    ap.add_argument('-n', '--last', type=int, default=2,
+                    help='newest N entries to take when no log_id is given (default 2)')
+    ap.add_argument('log_id', nargs='*', type=int, help='explicit ulog ids')
+    args = ap.parse_args()
+    ts, tc = parse_target(args.target)
 
-ids = sorted(entries)
-ts, tc = target
-print('target sys=%d comp=%d; %d logs id %d..%d' % (ts, tc, len(ids), ids[0], ids[-1]),
-      flush=True)
-want = [int(a) for a in sys.argv[1:]] or ids[-LAST:]
-for lid in want:
-    if lid not in entries:
-        print('id=%d not on FCU, skip' % lid, flush=True)
-        continue
-    fetch(ts, tc, lid, int(entries[lid].size))
-m.mav.log_request_end_send(ts, tc)
-print('ALL DONE', flush=True)
+    os.makedirs(OUT, exist_ok=True)
+    m = mavutil.mavlink_connection(SRC)
+
+    watch_heartbeats(m, HB_TIMEOUT)
+    entries = list_entries(m, ts, tc)
+    if not entries:
+        print('NO ENTRIES RECEIVED', flush=True)
+        sys.exit(2)
+
+    ids = sorted(entries)
+    print('target sys=%d comp=%d; %d logs id %d..%d'
+          % (ts, tc, len(ids), ids[0], ids[-1]), flush=True)
+    want = args.log_id or ids[-args.last:]
+    short = 0
+    for lid in want:
+        if lid not in entries:
+            print('id=%d not on FCU, skip' % lid, flush=True)
+            continue
+        if not fetch(m, ts, tc, lid, int(entries[lid].size)):
+            short += 1
+    m.mav.log_request_end_send(ts, tc)
+    print('ALL DONE%s' % (' (SHORT: %d)' % short if short else ''), flush=True)
+    if short:
+        sys.exit(3)
+
+
+if __name__ == '__main__':
+    main()

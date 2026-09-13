@@ -40,7 +40,7 @@ UAV1–UAV16），参与机全部回读确认 `gp_origin` 后才开放任务。A
 catkin_swarm6-2/
 ├── src/                    开发代码（6 个独立 git 仓库，不 push）
 │   ├── tcp_to_ros/             GCS_A 地面站主包（本文档所在包）
-│   │   └── tools/              实机运维工具（飞控 ulog 取件/分析、时钟修正；非 ROS 节点，不参与构建）
+│   │   └── tools/              实机运维工具（日志下载/分析、时钟修正；非 ROS 节点，不参与构建）
 │   ├── swarm_uav_interfaces/   共享 ROS msg/srv 契约（所有机必须同版本）
 │   ├── swarm_topology_bridge/  通用跨 Master 桥（Topic + Service 代理）
 │   ├── swarm_uav_executor/     机载任务执行器 + 安全 HOLD + 机载组合 launch/GPS bias/起飞脚本
@@ -286,7 +286,7 @@ GPS bias）与 `ego_planner_driver` 提供。原 `safe_valley_exp` 已于 260830
 | 路径 | 内容 |
 |---|---|
 | `src/tcp_to_ros/plans/README.md` | Phase 编号、全局设计规约、实施计划索引、里程碑、当前状态 |
-| `src/tcp_to_ros/tools/README.md` | 实机运维工具（飞控 ulog 取件/分析、时钟修正）与踩坑记录 |
+| `src/tcp_to_ros/tools/README.md` | 实机运维工具（日志下载/分析、时钟修正）与踩坑记录 |
 | `src/tcp_to_ros/plans/implementation_plan_26082415.md` | min-snap 统一单段重构（当前） |
 | `src/tcp_to_ros/plans/implementation_plan_26082300.md` / `26082322.md` | 方案 B / PositionTarget 契约基线 |
 | `src/tcp_to_ros/test_records/test_record_26082400.md` / `26082300.md` | PVA 链路 / 方案 B prepare 测试记录 |
