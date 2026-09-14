@@ -4,3 +4,6 @@ __pycache__/
 # 时钟修正参数文件含机载明文密码：只提交 .example 模板
 tools/configs/onboard.env
 tools/configs/*.local.env
+
+# log_fetch 归档不要落工作空间（现场约定 ~/Downloads/flight_logs）；这里兜底忽略
+tools/UAV*/

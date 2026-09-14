@@ -72,7 +72,8 @@ LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/log_fetch.sh -n 3 1 2 6 1
 目标写法：裸数字（`7`）= UAVn，同时决定飞控 MAVLink（`sys=n, comp=1`）与本机推 IP 规则
 （`IP_PREFIX.IP_STRIDE*n+IP_OFFSET`）；也接受 `UAV7`、`uav7`、区间 `1-6`、`host`、`user@host`（后两者收不到 ulog）。
 
-输出（`LOG_OUT` 默认当前目录；`UAVn_<时间>` 及其子目录全由脚本生成）：
+输出（`LOG_OUT` 默认当前目录；**现场约定显式给 `~/Downloads/flight_logs`，不要把归档落进工作空间**——
+否则 `tools/UAVn_*` 未跟踪目录会污染 `git status`，见 §6 坑 10；`UAVn_<时间>` 及其子目录全由脚本生成）：
 
 ```
 $LOG_OUT/UAV7_2026-09-14_1900/
@@ -225,6 +226,10 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
   `python3 -c '…SIG_DFL…' exec bash 机载脚本`（实测：python 能重置，`script`/roslaunch 都保得住默认处置）。
 - 远端脚本整段 base64 传输（密码、`:=` 等特殊字符不经过 ssh 命令行）；`pgrep` 匹配串只出现在被 base64 的
   脚本里，不会自匹配 ssh 包装 shell。
+- **首次实机（UAV13，2026-09-14，本机在地）**：`start` PASS **4.0 s**（`SETTLE_S=3`）、`status` 18 s 后
+  `UP(1)`、`logs` 正常、`stop` 两次都 `LEFT 0`（2.99 s / 2.99 s）；`log_fetch.sh 13` 归档 16 项 `FAIL 0`。
+  上机前必做两件事：① 停掉现场**旧工程自启**（§6 坑 11）；② 机载 executor 代码 pull 到含 `6356da4`
+  的版本（否则 `start` 直接 FAIL，原因见 §6 坑 12）。
 
 ## 6. 踩过的坑（先读再动手）
 
@@ -256,6 +261,25 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
    非交互 shell 的 `cmd &` 会给子进程塞 `SIGINT=SIG_IGN`，并一路继承到 `script`/roslaunch；
    此时 SIGINT 无效果，stop 拖到 10 s 后 SIGTERM，roslaunch 没机会收摊 → 节点可能变孤儿。
    修法是让**程序**（`python3`）重置 `SIG_DFL` 后再 `exec` 机载脚本（见 §5.1）。
+10. **归档别落工作空间**（2026-09-14 实测教训）：`LOG_OUT` 默认**当前目录**，在 `tools/` 里直接跑就生成
+    `tools/UAV13_2026-09-14_1444/` 这类未跟踪目录，一轮测试脏 3 个工件、`git status` 全是 `??`。
+    现场约定显式给 `LOG_OUT=~/Downloads/flight_logs`（§2 示例同）；`.gitignore` 另加 `tools/UAV*/` 兜底。
+    另：638 KB 的 ulog 实测 ≈40 s，30 s 级的终端/工具调用超时会把它掐成半截（`TRUNCATED`/`SIZE-MISMATCH`）
+    → 长下载放 `zellij`/`setsid` 里跑。
+11. **上机前先停现场旧自启**（2026-09-14 UAV13 实测）：旧工程自启
+    `~/.config/autostart/formation_follow.sh.desktop`（`gnome-terminal -x ~/formation_follow.sh` →
+    `catkin_ws` + `roslaunch mavros px4_multi.launch` + `offb_hover.py`）会占住 `udp:15500`；而本工作区入口
+    `uav_offboard_ego_real.launch` 自带 mavros（`udp://:15500@`、`tgt_system=<n>`）→ **两个 mavros 抢同一端口**。
+    做法：该 `.desktop` 置 `X-GNOME-Autostart-enabled=false`，停掉老 `roslaunch`/悬停进程，但**保留
+    `mavlink-routerd`**（`/dev/ttyTHS0:921600 → 127.0.0.1:15500`，飞控链路靠它）。
+12. **从 GCS ssh 启动不能带 `set -u` 去 source ROS**：`/opt/ros/noetic/etc/catkin/profile.d/1.ros_distro.sh:3`
+    读未定义的 `$ROS_DISTRO`，`set -eu` 下 `source /opt/ros/noetic/setup.bash` 直接以
+    `ROS_DISTRO: unbound variable` 中止（本地终端先 source 过 ROS 才不复现）。机载 `bashs/start_onboard.sh`
+    已用 `set +u` … `set -u` 包住两行 source（executor `6356da4`）；旧版现象 = `start` FAIL、机载
+    `.tmp/logs/onboard_ctl.err` 只有这一行、转录文件不生成。
+13. **`pgrep -f` 会自匹配探测命令自身**：`ssh host 'pgrep -af "bin/roslaunch .*uav_offboard_ego_real"'` 里
+    模式串在自己命令行里 → 明明已停也报「有 1 个」。用括号写法 `pgrep -af '[r]oslaunch'`，或
+    `ps -o pid,lstart,args -C python3` 复核。
 
 ## 7. 与文档/记录的关系
 
@@ -265,6 +289,7 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
   现场笔记与一次性脚本已归档 `.tmp/archive_260913/`（`uav7_260913/` 部署/取件/实测三份 + `log_dl_stub_test/` 桩测试）；
   目录名规则 `UAVn_<YYYY-MM-DD_HHMM>` 与归档先例 `UAV6-260911-1930`、`UAV6_2026-09-13_1756` 不同，
   **新归档以 `log_fetch.sh` 生成的形状为准**（旧目录保留原样，不回改）。
+- UAV13 首跑同一形状的归档：`~/Downloads/flight_logs/UAV13_2026-09-14_1447/`（16 项 `FAIL 0`、ulog 全量、md5 全 OK）。
 - 工程验证脚本（ego_smoke、acceptance、plot）另有落点：工作区 `verification/`（不入 git），与本目录职责不同。
 
 ### 7.1 改名对照（2026-09-14，C 方案：平铺 + 前缀）
