@@ -50,7 +50,8 @@ ego_planner_driver
 MAVROS
 ```
 
-机载程序通过新增的 systemd service 配置启动；MAVROS 使用：
+机载程序通过机载脚本（`bashs/*_onboard.sh`）或地面站批量工具（`tcp_to_ros/tools/onboard_ctl.sh`）显式启动；
+MAVROS 使用：
 
 ```text
 /opt/ros/noetic/share/mavros/launch/px4.launch
@@ -120,7 +121,7 @@ ROS_IP
 ROS_HOSTNAME
 ```
 
-现有 `uav_offboard_ego.launch`、`startup_offboard_ego.sh` 仍包含 localhost、仿真 UDP、逐机 SITL Master 和 PX4 Gazebo 启动假设。工作空间当前没有机载 systemd service 配置；实机 Startup Applications 由现场手动设置，不纳入本计划。
+现有 `uav_offboard_ego.launch`、`startup_offboard_ego.sh` 仍包含 localhost、仿真 UDP、逐机 SITL Master 和 PX4 Gazebo 启动假设。工作空间不含开机自启配置（本节原拟新增的 systemd service 已于 2026-09-14 删除，见 §6）；实机 Startup Applications 由现场手动设置，不纳入本计划。
 
 实机 ROS 网络环境沿用系统安装后的默认值（`ROS_MASTER_URI`/`ROS_IP`/`ROS_HOSTNAME`，本机默认 Master 11311），该用法已在实机 `safe_valley_exp` 工作空间验证；仅仿真因单机模拟多机需要额外配置 11310–11325。本计划不要求实机额外设置这些变量。
 
@@ -308,7 +309,12 @@ swarm_uav_executor
 
 MAVROS 使用 `/opt/ros/noetic/share/mavros/launch/px4.launch`，沿用已配好的默认参数和实机连接配置；不在本计划中重复显式配置默认值。仅检查现有机载启动入口是否正确 include 该 launch，并保证实际部署使用的 FCU 连接参数不会继续沿用 SITL 的 localhost/仿真 UDP 假设。
 
-## 6. 开机自启动
+## 6. 启动入口（原「开机自启动」）
+
+> **2026-09-14 变更**：机载程序从未安装/使用过 systemd，且不再需要开机自启，故本节原方案
+> （`swarm_uav_executor/services/` unit + 安装说明）已整体删除。现启动入口：机载本机
+> `bashs/start_onboard.sh` / `bashs/stop_onboard.sh`，地面站批量 `tcp_to_ros/tools/onboard_ctl.sh`。
+> 以下为原计划正文，仅作留档。
 
 为 `swarm_uav_executor/services/` 增加 systemd service 配置文件和 README，说明配置安装、`start`、`enable`、`status`、`stop`、`disable` 等操作。实机上的 Startup Applications 由现场手动设置，不纳入本计划。
 
@@ -318,12 +324,12 @@ MAVROS 使用 `/opt/ros/noetic/share/mavros/launch/px4.launch`，沿用已配好
 
 启动脚本至少负责：
 
-1. service 使用固定的本机工作空间和 ROS 环境；
+1. 使用固定的本机工作空间和 ROS 环境；
 2. 按仿真中单架 UAV 的机载程序顺序启动本机 MAVROS、原点接收器、GPS bias、bridge、ego planner、relay 和 executor；
 3. 保存 stdout/stderr 和启动失败原因；
-4. 通过 systemd 提供 `start`、`enable`、`status`、`stop`、`disable` 及失败重启策略。
+4. ~~通过 systemd 提供 `start`、`enable`、`status`、`stop`、`disable` 及失败重启策略~~（该条已于 2026-09-14 删除）。
 
-开机自启动不自动执行 arm、OFFBOARD、起飞或任务 START。当前 takeoff 程序尚未适配实机部署，实机测试阶段暂时使用遥控器完成 arm 与 OFFBOARD；后续再单独适配实机 takeoff 流程。
+启动脚本不自动执行 arm、OFFBOARD、起飞或任务 START。当前 takeoff 程序尚未适配实机部署，实机测试阶段暂时使用遥控器完成 arm 与 OFFBOARD；后续再单独适配实机 takeoff 流程。
 
 现有 `startup_offboard_ego.sh` 仅作为 15 机 SITL 循环启动参考，不能直接作为实机启动脚本。
 
@@ -347,7 +353,7 @@ MAVROS 使用 `/opt/ros/noetic/share/mavros/launch/px4.launch`，沿用已配好
 - A01–A16 身份映射与 A16→UAV16 替换任务解析；
 - 仿真仍只使用 GCS_A 与 UAV1–UAV15；
 - 实机 topology 的 GCS_A、UAV1–UAV16、物理 IP、`port_offset=0`、生产 topic/service 和拓扑 key 完整性；
-- hostname 身份发现、单机默认 ROS Master、systemd service 配置和本机启动顺序；
+- hostname 身份发现、单机默认 ROS Master 和本机启动顺序；
 - MAVROS `px4.launch` include 与现有 launch 参数接线；
 - 仅 `calibration_uavs` 在线并响应时即可完成原点计算、发布和 ready；
 - 终端/日志按 UAVn 输出逐机 ready（已确认/未确认）状态，实机分批上电时可人工核对任务相关 UAVn 均已 ready；
@@ -377,7 +383,6 @@ src/swarm_topology_bridge/launch/（实机入口或参数接线）
 src/swarm_topology_bridge/README.md
 src/swarm_uav_executor/launch/uav_offboard_ego.launch（仿真入口，保持独立）
 src/swarm_uav_executor/launch/uav_offboard_ego_real.launch（新增实机单机入口，透传实机 topology config）
-src/swarm_uav_executor/services/（systemd service 与安装说明）
 ```
 
 仅在审计确认存在实际接线缺口时修改对应文件；仿真 spawn、普通任务编组、yield 优先级和 planner 避碰算法不因本计划改变。

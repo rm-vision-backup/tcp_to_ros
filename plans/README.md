@@ -95,7 +95,7 @@ GCS_A 必须：
 | `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **曾实施（2026-09-08），当日源码回退至实施前；计划正文保留（见 状态-26090802）** |
 | `implementation_plan_26090900.md` | runtime/当前任务 UAV 集群 brake hold：TCP HOLD 诚实失败语义 + 目标过滤；单机安全终态→同任务参与者 fan-out 直接 BRAKE_HOLD（预测判据+replan 余地，仅参与者，去 EMERGENCY_BRAKE） | **已实施（2026-09-09，自动测试 354/0/0；SITL 组级直锁路径实测但 prepare SUCCESS 未达成，见 状态-26090900）** |
 | `implementation_plan_26091002.md` | 紧急邻机复用与 yield 锁存键修正：统一 `emergency_peer_id_`/`primary_peer`，锁存键加入邻机身份 | **不实施（2026-09-10 评估）：§3.2 非重要问题（锁存键漏让路有 BRAKE_HOLD 兜底）；§3.1 设计理念不同、非必要（几何 right-of-way 判据为有意设计）** |
-| `implementation_plan_26091101.md` | 原点校准集合参数化与实机多主部署适配：实机 topology、GCS_A/机载启动、MAVROS 与 Startup Applications 接线审计 | **已实施（2026-09-11，自动测试 367/0/0；15-UAV prepare SITL SUCCESS ticks=1648，见 test_record_26091103）** |
+| `implementation_plan_26091101.md` | 原点校准集合参数化与实机多主部署适配：实机 topology、GCS_A/机载启动、MAVROS 与 Startup Applications 接线审计（**其中 systemd 开机自启部分 2026-09-14 删除**：机载从未装过 unit，且不再需要开机自启） | **已实施（2026-09-11，自动测试 367/0/0；15-UAV prepare SITL SUCCESS ticks=1648，见 test_record_26091103）** |
 | `implementation_plan_26091316.md` | `ego_planner_driver` 基于起始位姿反馈的 5m 闭环软起飞：锁存起点、限速参考、反馈稳定到达后 HOLD | **暂不执行（2026-09-13 评估，计划正文保留）**：真因已定位并解决——2026-09-11 实机起飞 setpoint/thrust 震荡为开机自启动程序 `offb_hover.py` 与我方 `setpoint_relay` 双发布者争抢 `/mavros/setpoint_raw/local`，**非**开环斜坡所致；清除外部发布者后实机 5m 软起飞实测正常。见 §状态-26091316 |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README

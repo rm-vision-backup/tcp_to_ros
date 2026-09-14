@@ -18,7 +18,7 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 ## 1. 文件清单（平铺在 `tools/` 根下 + 前缀命名）
 
 命名约定：**前缀说清「碰谁」**——`log_*` = 一轮取件总入口；`fcu_*` = 走 MAVLink **直连飞控**（在线）；
-`onboard_*` = **ssh 到机载电脑**（在线）；`ulog_*` = 读 `.ulg` **文件**（离线，不碰链路）。
+`onboard_*` = **ssh 到机载电脑**（在线；修时钟 / 起停栈）；`ulog_*` = 读 `.ulg` **文件**（离线，不碰链路）。
 `.py` 用 `python3` 跑、`.sh` 用 `bash` 跑；除 `configs/` 外没有子目录。
 
 | 文件 | 用途 |
@@ -30,7 +30,8 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 | `ulog_zcheck.py` | ulog 快照：时长、local/global 位置、`actuator_armed`、`nav_state`、offboard 控制模式 |
 | `ulog_cmds.py` | ulog 内 `vehicle_command` 汇总，解码 `SET_GPS_GLOBAL_ORIGIN(48)` |
 | `onboard_clock_fix.sh` | 时钟修正：本机系统时钟 →（多次指定）机载系统时钟 → 机载 RTC（治「上电/重启回 1970」） |
-| `configs/onboard.env.example` | 机载账号/密码 + IP 规则模板（`onboard_clock_fix.sh` 与 `log_fetch.sh` **共用同一份**） |
+| `onboard_ctl.sh` | **机载栈远程启停**：`start/stop/status/logs` 多机扇出，实际动作调机载 `bashs/*_onboard.sh`（本机跑，见 §5.1） |
+| `configs/onboard.env.example` | 机载账号/密码 + IP 规则模板（`onboard_clock_fix.sh` / `log_fetch.sh` / `onboard_ctl.sh` **共用同一份**） |
 | `configs/onboard.env` | 上者的本地实参（含明文密码，已 gitignore；别提交、别 push） |
 
 
@@ -45,10 +46,10 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 | 机载 | `onboard/ego_planner/*.log`（planner 诊断，即 `diagnostic_log_dir`） | ssh：`~/catkin_swarm6-2/runtime_logs/ego_planner/` |
 | 机载 | `onboard/term/*_offboard_ego.log`（终端全量转录，§5.1.2 方式 B） | ssh：`~/catkin_swarm6-2/.tmp/logs/` |
 
-**本轮不收**（有意跳过）：systemd journal（`journalctl -u swarm-uav-onboard.service`）、nsh 快照（需要时按 §3 手动跑）、
-本机 GCS_A 侧 `.ros_home`、**旧 launch 的旁路日志**（机上 `~/.tmp/*.log`，如 `px4_multi.log`、`offb_hover*.log`：
+**本轮不收**（有意跳过）：nsh 快照（需要时按 §3 手动跑）、本机 GCS_A 侧 `.ros_home`、
+**旧 launch 的旁路日志**（机上 `~/.tmp/*.log`，如 `px4_multi.log`、`offb_hover*.log`：
 那是早期可用性测试用的 `px4_multi.launch` / 悬停脚本留下的，当前机载入口 `uav_offboard_ego_real.launch` 不产生）。
-理由：机载终端转录已盖住启动链输出；journal 需现场确认免密读权限；GCS 侧与非当前入口的旁路日志按需另收。
+理由：机载终端转录已盖住启动链输出；GCS 侧与非当前入口的旁路日志按需另收。
 
 ```bash
 # 收 UAV7：最新 1 条 ulog + 机载日志
@@ -193,6 +194,38 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
   注：`BOARD_SSH_PASS` 只喂远端 sudo；ssh 本身走密钥/交互 —— `log_fetch.sh` 额外支持装了 `sshpass` 时用它。
 - 密码经 stdin 交给 `sudo -S`，远端脚本整体 base64 传输，密码里的空格/引号/`$` 不会破坏命令（已实测）。
 
+### 5.1 `onboard_ctl.sh`：机载栈远程启停（本机 → 机载 `bashs/*_onboard.sh`）
+
+只在 **GCS 本机**跑；真正起停由**机载电脑**上既有的
+`<ws>/src/swarm_uav_executor/bashs/{start,stop}_onboard.sh` 完成（**那两个脚本 0 改动**，机载仍可手工跑）。
+`<ws>` 默认机载 `~/catkin_swarm6-2`；要改就在参数文件里设 `ONBOARD_WS`（机载上的绝对路径）。
+
+```bash
+./src/tcp_to_ros/tools/onboard_ctl.sh status 1-6                          # 谁在跑（一行一台）
+./src/tcp_to_ros/tools/onboard_ctl.sh start 1 2 4                         # 起（分离式：ssh 立刻返回）
+./src/tcp_to_ros/tools/onboard_ctl.sh start 7 -- interfaces_version:=v2   # `--` 之后原样交给 roslaunch
+./src/tcp_to_ros/tools/onboard_ctl.sh stop 1-6                            # 停（机载脚本自己 INT→TERM→KILL）
+./src/tcp_to_ros/tools/onboard_ctl.sh logs 7 [-f]                         # 看/跟机载终端转录
+./src/tcp_to_ros/tools/onboard_ctl.sh -n start 1-6                        # 干跑：只打印将执行的远程动作
+```
+
+- 目标写法与 `onboard_clock_fix.sh` 完全一致（裸数字 / 区间 / `UAV7` / `host` / `user@host`）；
+  选项 `-n` / `-c FILE` / `-t SEC` / `-u USER` / `-f`（logs 跟读）/ `-h`；参数文件同 §5 那份。
+- 退出码：`0` 全部成功；`1` 参数/配置错；`2` 至少一台 FAIL（`status` 只在「连不上」时算 FAIL，`DOWN` 不算）。
+- 输出：`start` 报 `PROCS/STARTED/TRANSCRIPT`；`stop` 报 `LEFT`（残留 roslaunch 数）；
+  `status` 报 `PROCS/LOG_TS/BYTES` + 「本轮启动」行。FAIL 时追加机载详情块
+  （`stop` 的命中进程列表 / `start` 的机载 stderr 尾部）并提示 `logs <目标>`。
+- **机载脚本缺失 = MISSING**：该机代码没同步时 `start`/`stop` 直接 FAIL（不静默成功），`status` 提示缺哪个文件。
+- **分离式启动**：`setsid` 分离 + stdin/stdout 丢弃，ssh 立即返回，断开 ssh / 关终端都不影响机载
+  （持久性不靠 zellij，也不留后台会话）；拉起后默认 3 s（`SETTLE_S`）回查 `pgrep` 判成败。
+- **为什么绕一道 python3**（而不是朴素的 `ssh host 'nohup ... &'`）：非交互 shell 的后台任务会被塞
+  `SIGINT=SIG_IGN`，一路继承到 roslaunch → 机载 `stop_onboard.sh` 的 SIGINT 失效，只能等它 10 s 后退化到
+  SIGTERM 硬杀（roslaunch 没机会收摊，节点可能变孤儿）。而 **shell 无权重置自己继承来的 ignore**（POSIX；
+  `set -m` 只在「本 shell 自己没被 ignore」时才管用），所以启动改成
+  `python3 -c '…SIG_DFL…' exec bash 机载脚本`（实测：python 能重置，`script`/roslaunch 都保得住默认处置）。
+- 远端脚本整段 base64 传输（密码、`:=` 等特殊字符不经过 ssh 命令行）；`pgrep` 匹配串只出现在被 base64 的
+  脚本里，不会自匹配 ssh 包装 shell。
+
 ## 6. 踩过的坑（先读再动手）
 
 1. **飞控心跳要认准 `sys:comp`**：`mavlink-routerd` 自己会发一路 `HEARTBEAT`（`autopilot=8`），
@@ -215,6 +248,14 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
    全部改成命令行参数（只保留 `LOG_OUT`）；② 同日起工具按 §1 的平铺 + 前缀改名（见 §7.1 对照表）。
    `.tmp/notes/…`、`test_records/…` 里 `MAV_TARGET=7:1 ULOG_OUT=<dir> python3 ulog_fetch_fcu.py` 这类命令
    照抄必然失败 → 换成 `LOG_OUT=<dir> python3 src/tcp_to_ros/tools/fcu_ulog_fetch.py -t 7`。
+8. **改名余波：`log_fetch.sh` 的 `TOOLS_DIR` 曾指到上一层**（2026-09-14 修）：它算成 `tools/..`，
+   于是 `DEFAULT_CONFIG` 找 `src/tcp_to_ros/configs/onboard.env`、`fcu_ulog_*.py` 也按 `src/tcp_to_ros/` 找 →
+   不带 `-c` 直接 `ERROR: config file not found` 退 1。现改为 `TOOLS_DIR=$SCRIPT_DIR`（.py 与 configs/ 都在 `tools/` 下）。
+   碰到「路径类」报错先怀疑改名的余波。
+9. **后台起的机载栈会让机载 `stop_onboard.sh` 的 SIGINT 失效**（`onboard_ctl.sh` 已绕开）：
+   非交互 shell 的 `cmd &` 会给子进程塞 `SIGINT=SIG_IGN`，并一路继承到 `script`/roslaunch；
+   此时 SIGINT 无效果，stop 拖到 10 s 后 SIGTERM，roslaunch 没机会收摊 → 节点可能变孤儿。
+   修法是让**程序**（`python3`）重置 `SIG_DFL` 后再 `exec` 机载脚本（见 §5.1）。
 
 ## 7. 与文档/记录的关系
 
