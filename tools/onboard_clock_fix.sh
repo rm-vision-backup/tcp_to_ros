@@ -31,6 +31,13 @@ set -uo pipefail
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 DEFAULT_CONFIG="$SCRIPT_DIR/configs/onboard.env"
 
+# —— 优先级：命令行（-u/-t）> 环境变量 > 参数文件 > 默认值 ——
+# 先在赋默认值**之前**抓环境变量（此刻抓到的才是「用户真的设了」），source 参数文件后再放回。
+env_user="${BOARD_SSH_USER:-}"
+env_pass="${BOARD_SSH_PASS:-}"
+env_sudopass="${BOARD_SUDO_PASS:-}"
+env_timeout="${SSH_TIMEOUT:-}"
+
 # —— 默认值（会被参数文件、环境变量、命令行依次覆盖）——
 BOARD_SSH_USER="${USER:-ubuntu}"
 BOARD_SSH_PASS=""
@@ -44,12 +51,8 @@ RTC_CANDIDATES="/dev/rtc /dev/rtc0 /dev/rtc1"
 
 DRY_RUN=0
 CONFIG="$DEFAULT_CONFIG"
-
-# 环境变量优先级高于参数文件：先记下来，source 之后再放回
-env_user="${BOARD_SSH_USER:-}"
-env_pass="${BOARD_SSH_PASS:-}"
-env_sudopass="${BOARD_SUDO_PASS:-}"
-env_timeout="${SSH_TIMEOUT:-}"
+cli_user=""       # 命令行值单独记，等参数文件与环境变量都落地后再盖上（最高优先级）
+cli_timeout=""
 
 usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; }
 
@@ -58,8 +61,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -n) DRY_RUN=1 ;;
     -c) CONFIG="${2:-}"; shift ;;
-    -t) SSH_TIMEOUT="${2:-}"; shift ;;
-    -u) BOARD_SSH_USER="${2:-}"; shift ;;
+    -t) cli_timeout="${2:-}"; shift ;;
+    -u) cli_user="${2:-}"; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
     *) TARGETS+=("$1") ;;
@@ -82,10 +85,13 @@ fi
 # shellcheck source=/dev/null
 . "$CONFIG"
 
+# 覆盖顺序：默认值（上面已落地）→ 参数文件（刚 source）→ 环境变量 → 命令行（-u/-t）
 [ -n "$env_user" ] && BOARD_SSH_USER="$env_user"
 [ -n "$env_pass" ] && BOARD_SSH_PASS="$env_pass"
 [ -n "$env_sudopass" ] && BOARD_SUDO_PASS="$env_sudopass"
 [ -n "$env_timeout" ] && SSH_TIMEOUT="$env_timeout"
+[ -n "$cli_user" ] && BOARD_SSH_USER="$cli_user"
+[ -n "$cli_timeout" ] && SSH_TIMEOUT="$cli_timeout"
 
 if [ -z "${BOARD_SSH_USER:-}" ]; then
   echo "ERROR: BOARD_SSH_USER not set in $CONFIG" >&2
@@ -205,12 +211,20 @@ REMOTE
 }
 
 # —— ssh 执行：一次连接跑完全部动作，不做交互提示 ——
+# 有密码（且本机装了 sshpass）就走 sshpass；否则退回裸 ssh（依赖密钥/ssh-agent）。
+pass_ok() {
+  [ -n "$BOARD_SSH_PASS" ] && [ "$BOARD_SSH_PASS" != CHANGE_ME ] \
+    && command -v sshpass >/dev/null 2>&1
+}
+
 run_remote() {
   local ip="$1" b64="$2" user="${3:-$BOARD_SSH_USER}"
-  ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout="$SSH_TIMEOUT" -o NumberOfPasswordPrompts=1 \
-      -o PreferredAuthentications=password,keyboard-interactive,publickey \
-      "${user}@${ip}" "echo $b64 | base64 -d | bash" 2>&1
+  local -a cmd=(ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" \
+      -o "ConnectTimeout=$SSH_TIMEOUT" -o "NumberOfPasswordPrompts=1" \
+      -o "PreferredAuthentications=password,keyboard-interactive,publickey" \
+      "${user}@${ip}" "echo $b64 | base64 -d | bash")
+  if pass_ok; then SSHPASS="$BOARD_SSH_PASS" sshpass -e "${cmd[@]}" 2>&1
+  else "${cmd[@]}" 2>&1; fi
 }
 
 val() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
