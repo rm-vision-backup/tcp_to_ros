@@ -62,6 +62,10 @@ LOG_OUT=~/Downloads/flight_logs ./src/tcp_to_ros/tools/log_fetch.sh -n 3 1 2 6 1
 ./src/tcp_to_ros/tools/log_fetch.sh -s -n 1 7
 ```
 
+- **多台串行**：主循环是 `while read`，一次给多台也**逐台**处理（机载阶段一趟 ssh 一台），无并发、也不打算并发：
+  `:15500` 是所有机载 routerd 共用的一个 UDP 端口，并发下载会让 `LOG_REQUEST_DATA` 分块互相抢带宽/错序（§6 坑 6）；
+  链路带宽本来就小，串行够用。
+
 | 选项 | 默认 | 说明 |
 |---|---|---|
 | `-n N` | `1` | 每台取最新 N 条 ulog；`0` = 只列清单不下载 |
@@ -164,7 +168,10 @@ python3 src/tcp_to_ros/tools/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
 机载无 NTP：上电/重启后系统时钟停在 `1970-01-01`；若 RTC 从未写入（或板子没有 RTC），重启又会回到 1970。
 `onboard_clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
 **② 机载系统时钟 → 机载 RTC**（`sudo hwclock --systohc`，设备按 `RTC_CANDIDATES` 探测）。
-两步都回读复核（`|Δ| <= TOLERANCE_S` 才 PASS），并可**一轮批量修多台**。
+验收（2026-09-14 UAV13 实机修正后）：**① 板钟与本机（GCS）基准之差 ≤ `TOLERANCE_S`** —— 比的是「落点」，
+不是「修前/修后步长」（老版本按步长判，板钟只偏 30 s 也会假 FAIL，见 §6 坑 14）；
+**② RTC 回读**（`timedatectl` → `hwclock -f <dev>` → `/proc/driver/rtc` 三源兜底，见坑 14）与板钟之差 ≤ `RTC_TOLERANCE_S`（默认 5 s）；
+回读不可得时给 `WARN`（不再静默 PASS）。多台**串行**一轮修完。
 
 ```bash
 # 首次：把参数文件建好（含明文密码，已 gitignore，别提交/别 push）
@@ -182,14 +189,17 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
 - **目标写法**：裸数字 = 无人机编号（`1 2 4 11 16` → UAV1/2/4/11/16）；也支持区间 `1-6`、`UAV7`、`uav7`、
   `host`、`user@host`（后者只覆盖该台的 ssh 用户）。
 - 选项：`-n` 干跑、`-c FILE` 换参数文件、`-t SEC` ssh 超时、`-u USER` 覆盖 ssh 用户。
-- 输出：`TARGET / SYS_DELTA / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`；
-  `PASS` 全对齐；`WARN(no RTC device: reboot resets to 1970)` = 系统时钟已修但板子无 RTC；
+- 输出：`TARGET / SYS_OFF / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`（`SYS_OFF` = 板钟 − 本机基准）；
+  明细行给 `base / sys_before / sys_step / rtc_src / rtc_before / adjtime`（`sys_step` = 本次实际拨动的秒数，仅作说明）。
+  `PASS` 全对齐；`WARN(no RTC device …)` = 系统时钟已修但板子无可用 RTC；
+  `WARN(rtc readback unavailable …)` = RTC 已写但回读不可得（无法确认跨重启）；
   `FAIL(...)` 带 `sudo_rc/sys_rc/rtc_rc` 便于定位（本机时钟早于 2020 直接拒绝执行）。
 - 退出码：`0` 全部成功；`1` 参数/配置/本机时钟错；`2` 至少一台失败。
 - **必须在启动 ROS 栈之前跑**：修正前启动的进程，其日志时间戳仍是 1970 基（`real_setup.md` §5.1.1 第 0 步）。
 - 参数文件（`configs/onboard.env`，机载账号/密码全机相同，**只记一份**；`log_fetch.sh` 也读它）：
   `BOARD_SSH_USER` / `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` / `TOLERANCE_S` /
-  `RTC_CANDIDATES` / `IP_PREFIX` / `IP_STRIDE` / `IP_OFFSET`（`UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)`）。
+  `RTC_TOLERANCE_S`（RTC 那一路的允许偏差，默认 5 s）/ `RTC_CANDIDATES` / `IP_PREFIX` / `IP_STRIDE` / `IP_OFFSET`
+  （`UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)`）。
   环境变量 `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` 优先级高于参数文件。
   `BOARD_SUDO_PASS` 留空 = 机载免密 sudo（脚本改用 `sudo -n`）。
   注：`BOARD_SSH_PASS` 只喂远端 sudo；ssh 本身走密钥/交互 —— `log_fetch.sh` 额外支持装了 `sshpass` 时用它。
@@ -230,6 +240,12 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
   `UP(1)`、`logs` 正常、`stop` 两次都 `LEFT 0`（2.99 s / 2.99 s）；`log_fetch.sh 13` 归档 16 项 `FAIL 0`。
   上机前必做两件事：① 停掉现场**旧工程自启**（§6 坑 11）；② 机载 executor 代码 pull 到含 `6356da4`
   的版本（否则 `start` 直接 FAIL，原因见 §6 坑 12）。
+- **重上电复验（同日 15:10，机载四仓 pull 后）**：板钟**自动恢复正确**（写过的 RTC 跨重启生效，`/dev/rtc` 回读同值）
+  → `start` PASS **3.96 s**、`status` 18 s 后 `UP(1)`、`logs` 见 FCU `VER: 13.1`、`/mavros/state` =
+  `connected: True / armed: False / guided: True / mode: AUTO.LOITER`、`stop` `LEFT 0` PASS **3.01 s**；
+  旧自启仍 `X-GNOME-Autostart-enabled=false`、`mavlink-routerd` 在、起栈前 `udp 15500` 空闲。
+- **多台串行**：目标主循环同样是 `while read`，一次给多台也逐台处理（`-c` 一份参数文件共用）；本轮现场只有
+  UAV13，多机未实跑，但工具链无并发分支（与 §2 同理由：链路带宽小）。
 
 ## 6. 踩过的坑（先读再动手）
 
@@ -278,8 +294,22 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
     已用 `set +u` … `set -u` 包住两行 source（executor `6356da4`）；旧版现象 = `start` FAIL、机载
     `.tmp/logs/onboard_ctl.err` 只有这一行、转录文件不生成。
 13. **`pgrep -f` 会自匹配探测命令自身**：`ssh host 'pgrep -af "bin/roslaunch .*uav_offboard_ego_real"'` 里
-    模式串在自己命令行里 → 明明已停也报「有 1 个」。用括号写法 `pgrep -af '[r]oslaunch'`，或
-    `ps -o pid,lstart,args -C python3` 复核。
+    模式串在自己命令行里 → 明明已停也报「有 1 个」。括号写法 `pgrep -af '[r]oslaunch'` 只能躲开**模式串自身**，
+    同一条命令行**别处**再出现该词仍会自匹配（2026-09-14 实测：末尾加了兜底 `|| echo "无 roslaunch/mavros"`，
+    于是「已停」也数出 1 个）。**最稳是按精确进程名**：`pgrep -x roslaunch`（`roslaunch` 的 comm 就是 `roslaunch`）
+    或 `ps -o pid,args -C roslaunch`；本轮起/停栈核对都用这两种（起栈时 = 1，停栈后 = 0）。
+    注：命中 2 个未必是自匹配——`script -q -e -f -a -c roslaunch …` 包装进程与真 `roslaunch` 会同时命中，
+    先 `pgrep -af … | cut -c1-70` 看是谁再下结论。
+14. **时钟工具的「验收基线」和「RTC 回读」是两个独立坑**（2026-09-14 UAV13 实测，`onboard_clock_fix.sh` 已修）：
+    ① 老版本拿 `sys_after - sys_before` 当验收 → 量的是「拨了多少」而非「落点对不对」：板钟只偏 30 s 就
+    `FAIL(system clock off by 30s)`、`exit=2`，而事后核对板钟 = 本机 = 同一 epoch（**假 FAIL**）。现改为
+    **板钟 − 本机基准** ≤ `TOLERANCE_S`，步长只写进明细行 `sys_step=`（回归：拨偏 60 s → `SYS_OFF=0s` PASS）。
+    ② `timedatectl show -p RTCTime --value` 在这块板（systemd `degraded`）返回**空且 rc=0** → RTC 段静默 `n/a`，
+    还给出「没验 RTC 的 PASS」。现三源兜底 `timedatectl → hwclock -f <dev> → /proc/driver/rtc` 并回显 `rtc_src=`；
+    三源全空则 `WARN(rtc readback unavailable …)`。③ 两个致命细节：`sudo -n` 在 `$( )`/管道里会退化成
+    `sudo: a password is required`（顶层却正常），所以命令替换里必须 `printf '%s\n' "$pass" | sudo -S …`；
+    `/proc/driver/rtc` 用 `awk -F': *'` 取 `$2` 只能拿到 `07`（时间字段自带冒号）→ 要用**默认空白分隔符取 `$3`**；
+    而且未加引号的 heredoc 里写 `\"` 会被**原样**带进远端 awk 程序（等于永不匹配）。
 
 ## 7. 与文档/记录的关系
 

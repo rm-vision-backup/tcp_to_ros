@@ -4,6 +4,8 @@
 # 动作两步：1) 本机系统时钟 → 机载系统时钟；2) 机载系统时钟 → 机载 RTC。
 # 背景：机载无 NTP，上电后系统时钟停在 1970-01-01；RTC 未写入则重启又回 1970。
 # 必须在本轮启动 ROS 栈之前执行：real_setup.md §3.2 第 1 步、§5.1.1 第 0 步。
+# 验收：① 板钟与本机（GCS）基准之差 ≤ TOLERANCE_S（比的是「落点」，不是「修前/修后步长」）；
+#       ② RTC 回读（timedatectl → hwclock -f 设备 → /proc/driver/rtc 依次兜底）与板钟之差 ≤ RTC_TOLERANCE_S（默认 5 s）。
 #
 # Usage:
 #   onboard_clock_fix.sh [选项] <目标> [目标 ...]
@@ -43,7 +45,8 @@ BOARD_SSH_USER="${USER:-ubuntu}"
 BOARD_SSH_PASS=""
 BOARD_SUDO_PASS=""
 SSH_TIMEOUT=8
-TOLERANCE_S=2
+TOLERANCE_S=2        # 系统钟 vs 本机（GCS）基准的允许偏差
+RTC_TOLERANCE_S=5    # RTC vs 板钟的允许偏差：放宽，含 hwclock 写 + 回读自身的秒级耗时
 IP_PREFIX="192.168.5"
 IP_STRIDE=10
 IP_OFFSET=1
@@ -186,10 +189,25 @@ else
   if sudo -n hwclock --systohc >/dev/null 2>&1; then rtc_rc=0; else rtc_rc=\$?; fi
 fi
 
-rtc_after=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
-[ -z "\$rtc_after" ] && rtc_after=n/a
-rtc_epoch=\$(date -d "\$rtc_after" +%s 2>/dev/null || echo n/a)
-[ -z "\$rtc_epoch" ] && rtc_epoch=n/a
+rtc_after=''; rtc_src=''
+# RTC 回读：多源兜底。本板实测 `timedatectl show -p RTCTime --value` 返回**空**且 rc=0
+# （systemd degraded）→ 只靠它会让 RTC 段静默 n/a 并给出「没验 RTC 的 PASS」（2026-09-14 UAV13 实测）。
+rtc_after=\$(timedatectl show -p RTCTime --value 2>/dev/null || true)
+[ -n "\$rtc_after" ] && rtc_src=timedatectl
+if [ -z "\$rtc_after" ]; then
+  if [ -n "\$pass" ]; then
+    rtc_after=\$(printf '%s\n' "\$pass" | sudo -S hwclock --show -f "\$rtc_dev" 2>/dev/null | tail -1)
+  else
+    rtc_after=\$(sudo -n hwclock --show -f "\$rtc_dev" 2>/dev/null | tail -1)
+  fi
+  [ -n "\$rtc_after" ] && rtc_src=hwclock
+fi
+if [ -z "\$rtc_after" ] && [ -r /proc/driver/rtc ]; then
+  rtc_after=\$(awk '\$1=="rtc_time"{t=\$3} \$1=="rtc_date"{d=\$3} END{if (d!="" && t!="") print d" "t" UTC"}' /proc/driver/rtc 2>/dev/null || true)
+  [ -n "\$rtc_after" ] && rtc_src=/proc/driver/rtc
+fi
+rtc_epoch=''
+if [ -n "\$rtc_after" ]; then rtc_epoch=\$(date -d "\$rtc_after" +%s 2>/dev/null || true); fi
 tze=\$(timedatectl show -p Timezone --value 2>/dev/null || echo n/a)
 syncp=\$(timedatectl show -p NTPSynchronized --value 2>/dev/null || echo n/a)
 adj=\$( [ -f /etc/adjtime ] && tail -1 /etc/adjtime 2>/dev/null || echo none )
@@ -207,6 +225,7 @@ echo "ntp_sync=\$syncp"
 echo "adjtime=\$adj"
 echo "rtc_before=\$rtc_before"
 echo "rtc_after=\$rtc_after"
+echo "rtc_src=\$rtc_src"
 REMOTE
 }
 
@@ -232,7 +251,7 @@ val() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
 # —— 主流程 ——
 status=0
 printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
-       TARGET SYS_DELTA SYS_TIME RTC_TIME RTC_DEV RTC_DELTA RESULT
+       TARGET SYS_OFF SYS_TIME RTC_TIME RTC_DEV RTC_DELTA RESULT
 printf '%s\n' "------------------------------------------------------------------------------------------------------"
 
 while read -r label ip tuser; do
@@ -252,6 +271,7 @@ while read -r label ip tuser; do
   sys_str=$(val sys_str "$out")
   rtc_dev=$(val rtc_dev "$out"); rtc_epoch=$(val rtc_epoch "$out")
   rtc_before=$(val rtc_before "$out"); rtc_after=$(val rtc_after "$out")
+  rtc_src=$(val rtc_src "$out")
   adjtime=$(val adjtime "$out")
 
   if [ -z "$sys_after" ]; then
@@ -262,27 +282,38 @@ while read -r label ip tuser; do
     continue
   fi
 
-  sys_delta=$((sys_after - sys_before))
-  sys_delta_abs=${sys_delta#-}
-  rtc_delta="n/a"
-  if [[ "$rtc_epoch" =~ ^[0-9]+$ ]]; then rtc_delta=$((rtc_epoch - sys_after)); fi
+  # 验收量 = 板钟相对 **本机（GCS）基准 $NOW** 的偏差；修前/修后差值只说明「走了多少步」，
+  # 不能当验收：板上只差 30 s 时老版本会误报 FAIL（2026-09-14 UAV13 实测，见 tools/README §5）。
+  sys_off=$((sys_after - NOW))
+  sys_off_abs=${sys_off#-}
+  sys_step=$((sys_after - sys_before))
+  rtc_delta="n/a"; rtc_disp="n/a"; rtc_time_disp="n/a"
+  if [[ "$rtc_epoch" =~ ^[0-9]+$ ]]; then
+    rtc_delta=$((rtc_epoch - sys_after))
+    rtc_disp="${rtc_delta}s"
+    rtc_time_disp=$(date -d "@$rtc_epoch" '+%F %T %Z')
+  elif [ -n "$rtc_after" ]; then
+    rtc_time_disp="$rtc_after"
+  fi
 
   result="PASS"
   if [ "$sys_rc" != "0" ]; then
     result="FAIL(system clock: sudo_rc=$sudo_rc sys_rc=$sys_rc)"
-  elif [ "$sys_delta_abs" -gt "$TOLERANCE_S" ]; then
-    result="FAIL(system clock off by ${sys_delta}s)"
+  elif [ "$sys_off_abs" -gt "$TOLERANCE_S" ]; then
+    result="FAIL(system clock off baseline by ${sys_off}s)"
   elif [ "$rtc_rc" -eq 91 ]; then
     result="WARN(no RTC device: reboot resets to 1970)"
   elif [ "$rtc_rc" != "0" ]; then
     result="FAIL(rtc write: rtc_rc=$rtc_rc)"
-  elif [ "$rtc_delta" != "n/a" ] && [ "${rtc_delta#-}" -gt "$TOLERANCE_S" ]; then
+  elif [ "$rtc_delta" = "n/a" ]; then
+    result="WARN(rtc readback unavailable: reboot persistence not confirmed)"
+  elif [ "${rtc_delta#-}" -gt "$RTC_TOLERANCE_S" ]; then
     result="FAIL(rtc off by ${rtc_delta}s)"
   fi
 
   printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
-         "$label" "${sys_delta}s" "${sys_str}" "${rtc_after}" "${rtc_dev:-none}" "${rtc_delta}s" "$result"
-  echo "    sys_before=${sys_before} rtc_before=${rtc_before} adjtime=${adjtime}"
+         "$label" "${sys_off}s" "$sys_str" "$rtc_time_disp" "${rtc_dev:-none}" "$rtc_disp" "$result"
+  echo "    sys_before=${sys_before} sys_step=${sys_step}s rtc_src=${rtc_src:-none} rtc_before=${rtc_before} adjtime=${adjtime}"
 
   case "$result" in
     PASS|WARN*) ;;
