@@ -167,11 +167,13 @@ python3 src/tcp_to_ros/tools/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
 
 机载无 NTP：上电/重启后系统时钟停在 `1970-01-01`；若 RTC 从未写入（或板子没有 RTC），重启又会回到 1970。
 `onboard_clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
-**② 机载系统时钟 → 机载 RTC**（`sudo hwclock --systohc`，设备按 `RTC_CANDIDATES` 探测）。
+**② 机载系统时钟 → 机载 RTC**（按 `RTC_CANDIDATES` 探测，**每一路存在的 RTC 都用 `-f <dev>` 单独写 + 回读**；
+`/dev/rtc` 常是指向 `rtc1` 的 symlink，按 `readlink -f` 去重——只写内核默认那路会剩下 1970 的另一路，重启从哪路恢复看 udev/内核）。
 验收（2026-09-14 UAV13 实机修正后）：**① 板钟与该台写入前现取的基准之差 ≤ `TOLERANCE_S`（默认 5 s）** —— 比的是「落点」，
 不是「修前/修后步长」（老版本按步长判，板钟只偏 30 s 也会假 FAIL，见 §6 坑 14）；
-**② RTC 回读**（`timedatectl` → `hwclock -f <dev>` → `/proc/driver/rtc` 三源兜底，见坑 14）与板钟之差 ≤ `RTC_TOLERANCE_S`（默认 5 s）；
-回读不可得时给 `WARN`（不再静默 PASS）。多台**串行**一轮修完。
+**② RTC 回读**（`timedatectl` → `hwclock -f <dev>` → `/proc/driver/rtc` 三源兜底，见坑 14）与板钟之差 ≤ `RTC_TOLERANCE_S`（默认 5 s），
+多路时取**偏差最大**的那一路（`rtc_all=` 列出每路，任一路不对都可能让重启回 1970）；
+回读不可得时给 `WARN`（不再静默 PASS）。多台**串行**一轮修完（9 台实测一轮 ~50 s）。
 
 **容差故意放宽到 5 s（本工具不要求秒级）**，依据与实测：
 
@@ -205,8 +207,9 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
   `host`、`user@host`（后者只覆盖该台的 ssh 用户）。
 - 选项：`-n` 干跑、`-c FILE` 换参数文件、`-t SEC` ssh 超时、`-u USER` 覆盖 ssh 用户。
 - 输出：`TARGET / SYS_OFF / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`（`SYS_OFF` = 板钟 − **该台**基准）；
-  明细行给 `base / sys_before / sys_step / rtc_src / rtc_before / adjtime`（`base` = 该台写入前现取的基准；
-  `sys_step` = 本次实际拨动的秒数，仅作说明，不当验收）。
+  明细行给 `base / sys_before / sys_step / rtc_all / rtc_src / rtc_before / adjtime`，写 RTC 出错时追加 `rtc_wrerr=`
+  （`rtc_all` = 每一路 RTC 相对板钟的偏差，`RTC_DEV`/`RTC_TIME`/`RTC_DELTA` 取偏差最大的那一路；
+  `base` = 该台写入前现取的基准；`sys_step` = 本次实际拨动的秒数，仅作说明，不当验收）。
   `PASS` 全对齐；`WARN(no RTC device …)` = 系统时钟已修但板子无可用 RTC；
   `WARN(rtc readback unavailable …)` = RTC 已写但回读不可得（无法确认跨重启）；
   `FAIL(...)` 带 `sudo_rc/sys_rc/rtc_rc` 便于定位（本机时钟早于 2020 直接拒绝执行）。
@@ -332,6 +335,24 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
     共用一个** epoch：串行修 16 台时靠后的板被写成「旧 epoch」，板间差 = 本轮用时（也正对着参考 swarm 的 10 s
     门限）。现改为 **`TOLERANCE_S=5` + 每台写入前现取基准**（明细行 `base=`），桩测同延迟下三台恒 `3s` 不累积。
     放宽**不牺牲检出**：偏差 8 s → `FAIL(system clock off baseline by 8s)`；还在 1970 → 偏差 ~1.79e9 必 FAIL。
+15. **`onboard_clock_fix.sh` 一次修 9 台时挖出的 4 个真机坑**（2026-09-14，`tools/README §5` 已同步；桩侧全部能回归）：
+    ① **只写默认 RTC + 读 symlink = 假 FAIL**：`hwclock --systohc` 不带 `-f` 写的是内核默认 RTC（本板 `rtc0`），
+    而 `RTC_CANDIDATES` 第一个候选 `/dev/rtc` 是 **symlink → `rtc1`** → 写 rtc0、读 rtc1，回读到 1970 →
+    `FAIL(rtc off by -1789371475s)`（UAV1 实测）。而且另一路留在 1970。现改为**每一路存在的 RTC 都用
+    `-f <dev>` 写 + 回读**（`readlink -f` 去重），`rtc_all=rtc0:3s rtc1:1s` 逐路列出，取最大偏差做判据。
+    ② **`while read … done <<<"$list"` + 真 ssh 会只处理第一台**：真 ssh 把本地 stdin 转发给远端命令 →
+    把 herestring 里剩余的目标行**吃光**，循环第一轮后 `read` 直接 EOF → 9 台只修 1 台，而且 **`exit=0`**（静默漏修！）。
+    桩 `ssh` 原先不读 stdin，所以 10 个桩用例全绿也查不出。现为 **fd 3 读目标 + ssh 一律 `</dev/null`**，
+    桩 `ssh` 也照真 ssh 吞 stdin（吞到就记 `ssh-drained-stdin`），复现→修复都有回归。
+    ③ **拨钟会让 sudo 时间戳「瞬间过期」**：板钟还在 1970 时创建的 sudo 时间戳（~1.9e3），`date -s` 跳到 2026 后
+    与新钟差 1.79e9 s → 之后所有 `sudo -n` 退化成 `sudo: a password is required`（7 台**未修过**的板实测：
+    `date -s` 成功、`hwclock` 全失败 → `FAIL(rtc write: rtc_rc=1)`；已修过的 UAV1/UAV13 反而正常，因为钟没跳）。
+    现为**拨钟后重新预授权**（`sudo -S -v`）+ RTC 写/读一律走带密码的 `sudo -S`；并回显 `rtc_wrerr=`（此前被
+    `>/dev/null 2>&1` 吞掉，只报 rc=1 让人查了半天）。桩开关 `STUB_SUDO_STALE_ON_SET=1` 复现该路径。
+    ④ **unquoted heredoc 注释里的反引号会在本机执行**：`agent` 写的注释提到 `hwclock --systohc` / `sudo -S` 时带了反引号，
+    于是每台目标前**本机真跑了一次 `hwclock`/`sudo`**（本机 RTC 不可访问才没出事，但等于把目标机的动作在本机执行了一遍）。
+    注意脚本正文里的裸命令替换/反引号必须按 heredoc 规则转义（远程要用的 `\$(` 必须保留），并加自检：
+    用 awk 截出 heredoc 体后 grep 未转义反引号与未转义 `$( ` → 必须无输出（桩 README 第 4 条给了现成命令）。
 
 ## 7. 与文档/记录的关系
 

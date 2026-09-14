@@ -169,8 +169,15 @@ rtc_b64=$rtc_b64
 pass=\$(printf '%s' "\$sudo_pass_b64" | base64 -d)
 rtc_candidates=\$(printf '%s' "\$rtc_b64" | base64 -d)
 
-rtc_dev=''
-for d in \$rtc_candidates; do [ -e "\$d" ] && rtc_dev="\$d" && break; done
+rtc_devs=''
+for d in \$rtc_candidates; do
+  [ -e "\$d" ] || continue
+  real=\$(readlink -f "\$d" 2>/dev/null || echo "\$d")
+  case " \$rtc_devs " in *" \$real "*) continue ;; esac   # /dev/rtc 常是 symlink，去重避免同一路写两遍
+  rtc_devs="\$rtc_devs \$real"
+done
+rtc_devs=\${rtc_devs# }
+rtc_dev=\${rtc_devs%% *}
 
 # 写入前先取 RTC 现状（作为「修之前是否停在 1970」的证据）
 rtc_before=\$(timedatectl show -p RTCTime --value 2>/dev/null || echo n/a)
@@ -191,18 +198,58 @@ fi
 sys_after=\$(date +%s)
 sys_str=\$(date '+%F %T %Z')
 
+# 拨钟后必须**重新预授权**：板钟从 1970 跳到 2026 时，sudo 时间戳里记的是 1970 的时刻
+# （~1.9e3），而此刻已是 ~1.79e9 → sudo 认为时间戳「瞬间过期」→ 之后所有 sudo -n 都退化成
+# "sudo: a password is required"（2026-09-14 实测：7 台未修过的板 date -s 成功、hwclock 全失败）。
+if [ -n "\$pass" ]; then
+  printf '%s\\n' "\$pass" | sudo -S -v >/dev/null 2>&1 || true
+else
+  sudo -n -v >/dev/null 2>&1 || true
+fi
+
+# 每路 RTC 都「写 + 回读」，且写和读用**同一个 -f 设备**：
+#   hwclock --systohc（不带 -f）写的是内核默认 RTC，而 /dev/rtc 常是 symlink（本板 → rtc1）→
+#   写 rtc0、读 /dev/rtc(=rtc1) 就会读到 1970 的**假 FAIL**（2026-09-14 UAV1 实测）；
+#   而且只写默认那路时，另一路留在 1970，重启后从哪路恢复取决于内核/udev → 两路都要写。
+# 写失败必须回显 stderr（rtc_wrerr）：这一路曾被 >/dev/null 2>&1 吞掉，导致「只报 rc=1 不知为何」。
 rtc_rc=90
+rtc_report=''; rtc_wrerr=''
 if [ "\$sudo_rc" -ne 0 ]; then
   rtc_rc=90
-elif [ -z "\$rtc_dev" ]; then
+elif [ -z "\$rtc_devs" ]; then
   rtc_rc=91
 else
-  if sudo -n hwclock --systohc >/dev/null 2>&1; then rtc_rc=0; else rtc_rc=\$?; fi
+  rtc_rc=0
+  for d in \$rtc_devs; do
+    werr=''
+    if [ -n "\$pass" ]; then
+      werr=\$(printf '%s\\n' "\$pass" | sudo -S hwclock --systohc -f "\$d" 2>&1 >/dev/null) || rtc_rc=1
+    else
+      werr=\$(sudo -n hwclock --systohc -f "\$d" 2>&1 >/dev/null) || rtc_rc=1
+    fi
+    # 只留第一行**真错误**：sudo -S 会把 "[sudo] password for xxx:" 提示写进 stderr（不是错误）
+    werr=\$(printf '%s' "\$werr" | grep -v -e '\[sudo\]' -e 'password for' | head -1)
+    [ -n "\$werr" ] && rtc_wrerr="\$rtc_wrerr [\$d \$(printf '%s' "\$werr" | head -1)]"
+    e=''
+    if [ -n "\$pass" ]; then
+      e=\$(printf '%s\\n' "\$pass" | sudo -S hwclock --show -f "\$d" 2>/dev/null | tail -1)
+    else
+      e=\$(sudo -n hwclock --show -f "\$d" 2>/dev/null | tail -1)
+    fi
+    ee=''
+    [ -n "\$e" ] && ee=\$(date -d "\$e" +%s 2>/dev/null || true)   # 空串会被 date -d "" 解析成「今天 0 点」
+    rtc_report="\$rtc_report \$d=\${ee:-n/a}"
+  done
+  rtc_report=\${rtc_report# }
+  rtc_wrerr=\${rtc_wrerr# }
 fi
 
 rtc_after=''; rtc_src=''
-# RTC 回读：多源兜底。本板实测 `timedatectl show -p RTCTime --value` 返回**空**且 rc=0
+# RTC 回读：多源兜底。本板实测 timedatectl show -p RTCTime --value 返回**空**且 rc=0
 # （systemd degraded）→ 只靠它会让 RTC 段静默 n/a 并给出「没验 RTC 的 PASS」（2026-09-14 UAV13 实测）。
+# 注：本 heredoc 是**不带引号**的，注释里绝不能用反引号或裸命令替换——它们会被当命令替换**在本机执行**
+#   （2026-09-14 实测两次：注释里提到 hwclock/sudo 时带了反引号，结果每台目标前都在本机真跑了一次
+#    hwclock / sudo。自检：awk 截出本函数体后 grep 未转义反引号与未转义 \$\( ，见桩 README 第 4 条）。
 rtc_after=\$(timedatectl show -p RTCTime --value 2>/dev/null || true)
 [ -n "\$rtc_after" ] && rtc_src=timedatectl
 if [ -z "\$rtc_after" ]; then
@@ -230,6 +277,9 @@ echo "sys_before=\$sys_before"
 echo "sys_after=\$sys_after"
 echo "sys_str=\$sys_str"
 echo "rtc_dev=\$rtc_dev"
+echo "rtc_devs=\$rtc_devs"
+echo "rtc_report=\$rtc_report"
+echo "rtc_wrerr=\$rtc_wrerr"
 echo "rtc_epoch=\$rtc_epoch"
 echo "tz=\$tze"
 echo "ntp_sync=\$syncp"
@@ -253,9 +303,12 @@ run_remote() {
       -o "ConnectTimeout=$SSH_TIMEOUT" -o "NumberOfPasswordPrompts=1" \
       -o "PreferredAuthentications=password,keyboard-interactive,publickey" \
       "${user}@${ip}" "echo $b64 | base64 -d | bash")
-  if pass_ok; then SSHPASS="$BOARD_SSH_PASS" sshpass -e "${cmd[@]}" 2>&1
-  else "${cmd[@]}" 2>&1; fi
+  if pass_ok; then SSHPASS="$BOARD_SSH_PASS" sshpass -e "${cmd[@]}" </dev/null 2>&1
+  else "${cmd[@]}" </dev/null 2>&1; fi
 }
+# 注：`</dev/null` 不是可有可无——真 ssh 会把本地 stdin 转发给远端命令，若它继承了 while 循环的
+# stdin（herestring / 管道），就会把剩余目标行吃光 → **只处理第一台且 rc=0**（静默漏修）。
+# 桩 bin/ssh 已复现该行为；配合下面的 fd 3 双保险。
 
 val() { sed -n "s/^$1=//p" <<<"$2" | head -1; }
 
@@ -265,7 +318,7 @@ printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
        TARGET SYS_OFF SYS_TIME RTC_TIME RTC_DEV RTC_DELTA RESULT
 printf '%s\n' "------------------------------------------------------------------------------------------------------"
 
-while read -r label ip tuser; do
+while read -r label ip tuser <&3; do
   [ -n "${label:-}" ] || continue
   # 基准**逐台现取**：串行修多台时若共用一趟开头的 epoch，靠后的板会被写成「旧 epoch」（板间
   # 差 = 本轮用时）。现取后每台都贴着本机实时，差异只剩 ssh 往返（~0.5 s），
@@ -287,6 +340,7 @@ while read -r label ip tuser; do
   rtc_dev=$(val rtc_dev "$out"); rtc_epoch=$(val rtc_epoch "$out")
   rtc_before=$(val rtc_before "$out"); rtc_after=$(val rtc_after "$out")
   rtc_src=$(val rtc_src "$out")
+  rtc_wrerr=$(val rtc_wrerr "$out")
   adjtime=$(val adjtime "$out")
 
   if [ -z "$sys_after" ]; then
@@ -302,6 +356,19 @@ while read -r label ip tuser; do
   sys_off=$((sys_after - NOW))
   sys_off_abs=${sys_off#-}
   sys_step=$((sys_after - sys_before))
+  # RTC：远端对**每一路**存在的设备都写过 + 读过（rtc_report="dev=epoch …"）；验收取偏差最大的那一路
+  # （任一路不对都可能让重启回 1970），明细里列出全部。
+  rtc_all=''; rtc_worst_abs=-1
+  for pair in $(val rtc_report "$out"); do
+    d=${pair%%=*}; e=${pair##*=}
+    if [[ "$e" =~ ^[0-9]+$ ]]; then
+      dd=$((e - sys_after)); ad=${dd#-}
+      rtc_all+="${d##*/}:${dd}s "
+      if [ "$ad" -gt "$rtc_worst_abs" ]; then rtc_worst_abs="$ad"; rtc_dev="$d"; rtc_epoch="$e"; fi
+    else
+      rtc_all+="${d##*/}:n/a "
+    fi
+  done
   rtc_delta="n/a"; rtc_disp="n/a"; rtc_time_disp="n/a"
   if [[ "$rtc_epoch" =~ ^[0-9]+$ ]]; then
     rtc_delta=$((rtc_epoch - sys_after))
@@ -328,12 +395,12 @@ while read -r label ip tuser; do
 
   printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
          "$label" "${sys_off}s" "$sys_str" "$rtc_time_disp" "${rtc_dev:-none}" "$rtc_disp" "$result"
-  echo "    base=${NOW} sys_before=${sys_before} sys_step=${sys_step}s rtc_src=${rtc_src:-none} rtc_before=${rtc_before} adjtime=${adjtime}"
+  echo "    base=${NOW} sys_before=${sys_before} sys_step=${sys_step}s rtc_all=${rtc_all:-n/a} rtc_src=${rtc_src:-none} rtc_before=${rtc_before} adjtime=${adjtime}${rtc_wrerr:+ rtc_wrerr=$rtc_wrerr}"
 
   case "$result" in
     PASS|WARN*) ;;
     *) status=2 ;;
   esac
-done <<<"$TARGET_LINES"
+done 3<<<"$TARGET_LINES"
 
 exit "$status"
