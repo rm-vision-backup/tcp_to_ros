@@ -168,10 +168,25 @@ python3 src/tcp_to_ros/tools/ulog_cmds.py  <ULOG_DIR>/log_6*.ulg
 机载无 NTP：上电/重启后系统时钟停在 `1970-01-01`；若 RTC 从未写入（或板子没有 RTC），重启又会回到 1970。
 `onboard_clock_fix.sh` 一次做两步：**① 本机系统时钟 → 机载系统时钟**（`sudo date -s @<本机 epoch>`）；
 **② 机载系统时钟 → 机载 RTC**（`sudo hwclock --systohc`，设备按 `RTC_CANDIDATES` 探测）。
-验收（2026-09-14 UAV13 实机修正后）：**① 板钟与本机（GCS）基准之差 ≤ `TOLERANCE_S`** —— 比的是「落点」，
+验收（2026-09-14 UAV13 实机修正后）：**① 板钟与该台写入前现取的基准之差 ≤ `TOLERANCE_S`（默认 5 s）** —— 比的是「落点」，
 不是「修前/修后步长」（老版本按步长判，板钟只偏 30 s 也会假 FAIL，见 §6 坑 14）；
 **② RTC 回读**（`timedatectl` → `hwclock -f <dev>` → `/proc/driver/rtc` 三源兜底，见坑 14）与板钟之差 ≤ `RTC_TOLERANCE_S`（默认 5 s）；
 回读不可得时给 `WARN`（不再静默 PASS）。多台**串行**一轮修完。
+
+**容差故意放宽到 5 s（本工具不要求秒级）**，依据与实测：
+
+- 机间 intent 时间戳对齐由 `gps_bias` 负责：`bias = header.stamp − GPS UTC`
+  （`swarm_uav_executor/scripts/gps_bias_node.py`），接收端 `T_own = T_other − bias_other + bias_own`
+  → **两端系统钟偏差在差分里被抵消**，driver 侧 age 检查与绝对钟偏差无关；
+- 参考 swarm 规划器要到 **10 s** 才判 `swarm time not synchronized` 并丢轨迹
+  （`references/swarm-main/src/planner/.../ego_replan_fsm.cpp:684`）；
+- 本机 driver 的 intent 接收窗是 **±30 s**（`neighbor_intent_stale_s`，`ego_planner_driver/config/safety_defaults.yaml`）。
+  2 s 会被 ssh 往返 + 回读耗时顶到 FAIL（桩测 `STUB_SSH_DELAY=3` 复现：`SYS_OFF=3s` → 旧默认 FAIL、5 s PASS），
+  5 s 留余量又远小于上述门限。
+- **基准逐台现取**（不再是一趟共用一个）：串行修多台时若共用，靠后的板会被写成「旧 epoch」、板间差 = 本轮用时；
+  现取后每台 `SYS_OFF` 只反映自身往返（桩测同样 `STUB_SSH_DELAY=3` 下三台恒为 `3s`，不累积）。
+- 放宽后**仍抓得住没修好**：板钟偏 8 s（> 5 s）判 `FAIL(system clock off baseline by 8s)`；
+  完全没拨动（还在 1970）偏差是 ~1.79e9，必 FAIL。容差只影响「够不够齐」，不影响「有没有修」。
 
 ```bash
 # 首次：把参数文件建好（含明文密码，已 gitignore，别提交/别 push）
@@ -189,15 +204,16 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
 - **目标写法**：裸数字 = 无人机编号（`1 2 4 11 16` → UAV1/2/4/11/16）；也支持区间 `1-6`、`UAV7`、`uav7`、
   `host`、`user@host`（后者只覆盖该台的 ssh 用户）。
 - 选项：`-n` 干跑、`-c FILE` 换参数文件、`-t SEC` ssh 超时、`-u USER` 覆盖 ssh 用户。
-- 输出：`TARGET / SYS_OFF / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`（`SYS_OFF` = 板钟 − 本机基准）；
-  明细行给 `base / sys_before / sys_step / rtc_src / rtc_before / adjtime`（`sys_step` = 本次实际拨动的秒数，仅作说明）。
+- 输出：`TARGET / SYS_OFF / SYS_TIME / RTC_TIME / RTC_DEV / RTC_DELTA / RESULT`（`SYS_OFF` = 板钟 − **该台**基准）；
+  明细行给 `base / sys_before / sys_step / rtc_src / rtc_before / adjtime`（`base` = 该台写入前现取的基准；
+  `sys_step` = 本次实际拨动的秒数，仅作说明，不当验收）。
   `PASS` 全对齐；`WARN(no RTC device …)` = 系统时钟已修但板子无可用 RTC；
   `WARN(rtc readback unavailable …)` = RTC 已写但回读不可得（无法确认跨重启）；
   `FAIL(...)` 带 `sudo_rc/sys_rc/rtc_rc` 便于定位（本机时钟早于 2020 直接拒绝执行）。
 - 退出码：`0` 全部成功；`1` 参数/配置/本机时钟错；`2` 至少一台失败。
 - **必须在启动 ROS 栈之前跑**：修正前启动的进程，其日志时间戳仍是 1970 基（`real_setup.md` §5.1.1 第 0 步）。
 - 参数文件（`configs/onboard.env`，机载账号/密码全机相同，**只记一份**；`log_fetch.sh` 也读它）：
-  `BOARD_SSH_USER` / `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` / `TOLERANCE_S` /
+  `BOARD_SSH_USER` / `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` / `TOLERANCE_S`（默认 5 s，见上文放宽依据）/
   `RTC_TOLERANCE_S`（RTC 那一路的允许偏差，默认 5 s）/ `RTC_CANDIDATES` / `IP_PREFIX` / `IP_STRIDE` / `IP_OFFSET`
   （`UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)`）。
   环境变量 `BOARD_SSH_PASS` / `BOARD_SUDO_PASS` / `SSH_TIMEOUT` 优先级高于参数文件。
@@ -303,13 +319,19 @@ $EDITOR src/tcp_to_ros/tools/configs/onboard.env     # 填 BOARD_SSH_USER / BOAR
 14. **时钟工具的「验收基线」和「RTC 回读」是两个独立坑**（2026-09-14 UAV13 实测，`onboard_clock_fix.sh` 已修）：
     ① 老版本拿 `sys_after - sys_before` 当验收 → 量的是「拨了多少」而非「落点对不对」：板钟只偏 30 s 就
     `FAIL(system clock off by 30s)`、`exit=2`，而事后核对板钟 = 本机 = 同一 epoch（**假 FAIL**）。现改为
-    **板钟 − 本机基准** ≤ `TOLERANCE_S`，步长只写进明细行 `sys_step=`（回归：拨偏 60 s → `SYS_OFF=0s` PASS）。
+    **板钟 − 该台基准** ≤ `TOLERANCE_S`（默认 5 s），步长只写进明细行 `sys_step=`（回归：拨偏 60 s → `SYS_OFF=0s` PASS）。
     ② `timedatectl show -p RTCTime --value` 在这块板（systemd `degraded`）返回**空且 rc=0** → RTC 段静默 `n/a`，
     还给出「没验 RTC 的 PASS」。现三源兜底 `timedatectl → hwclock -f <dev> → /proc/driver/rtc` 并回显 `rtc_src=`；
     三源全空则 `WARN(rtc readback unavailable …)`。③ 两个致命细节：`sudo -n` 在 `$( )`/管道里会退化成
     `sudo: a password is required`（顶层却正常），所以命令替换里必须 `printf '%s\n' "$pass" | sudo -S …`；
     `/proc/driver/rtc` 用 `awk -F': *'` 取 `$2` 只能拿到 `07`（时间字段自带冒号）→ 要用**默认空白分隔符取 `$3`**；
     而且未加引号的 heredoc 里写 `\"` 会被**原样**带进远端 awk 程序（等于永不匹配）。
+    ④ **容差 2 s 太紧、基准不该一趟共用**（2026-09-14 复核放宽，结论写在 §5）：验收量是「板钟 − 基准」，
+    而基准是 ssh 之前取的，于是 `SYS_OFF` 天然含一次 ssh 往返 + 远端执行耗时；链路慢一点 2 s 就顶破 →
+    **假 FAIL**（桩 `STUB_SSH_DELAY=3`：`SYS_OFF=3s`，`TOLERANCE_S=2` FAIL、`=5` PASS）。同时基准原先是**整轮
+    共用一个** epoch：串行修 16 台时靠后的板被写成「旧 epoch」，板间差 = 本轮用时（也正对着参考 swarm 的 10 s
+    门限）。现改为 **`TOLERANCE_S=5` + 每台写入前现取基准**（明细行 `base=`），桩测同延迟下三台恒 `3s` 不累积。
+    放宽**不牺牲检出**：偏差 8 s → `FAIL(system clock off baseline by 8s)`；还在 1970 → 偏差 ~1.79e9 必 FAIL。
 
 ## 7. 与文档/记录的关系
 

@@ -4,8 +4,10 @@
 # 动作两步：1) 本机系统时钟 → 机载系统时钟；2) 机载系统时钟 → 机载 RTC。
 # 背景：机载无 NTP，上电后系统时钟停在 1970-01-01；RTC 未写入则重启又回 1970。
 # 必须在本轮启动 ROS 栈之前执行：real_setup.md §3.2 第 1 步、§5.1.1 第 0 步。
-# 验收：① 板钟与本机（GCS）基准之差 ≤ TOLERANCE_S（比的是「落点」，不是「修前/修后步长」）；
+# 验收：① 板钟与该台写入**前现取**的本机（GCS）基准之差 ≤ TOLERANCE_S（默认 5 s；比的是「落点」，
+#          不是「修前/修后步长」）；
 #       ② RTC 回读（timedatectl → hwclock -f 设备 → /proc/driver/rtc 依次兜底）与板钟之差 ≤ RTC_TOLERANCE_S（默认 5 s）。
+# 容差是**故意放宽**的（不要求秒级）：依据见本文件 TOLERANCE_S 默认值处的注释与 tools/README.md §5。
 #
 # Usage:
 #   onboard_clock_fix.sh [选项] <目标> [目标 ...]
@@ -23,7 +25,8 @@
 #   -h          本帮助
 #
 # 参数文件（机载账号/密码全机相同，模板见 configs/onboard.env.example）：
-#   BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS / SSH_TIMEOUT / TOLERANCE_S
+#   BOARD_SSH_USER / BOARD_SSH_PASS / BOARD_SUDO_PASS / SSH_TIMEOUT / TOLERANCE_S（默认 5）
+#   RTC_TOLERANCE_S（默认 5）/ RTC_CANDIDATES
 #   IP_PREFIX / IP_STRIDE / IP_OFFSET  →  UAVn = IP_PREFIX.(IP_STRIDE*n + IP_OFFSET)
 #
 # 退出码：0 全部成功；1 参数/配置/本机时钟错误；2 至少一台失败
@@ -45,7 +48,15 @@ BOARD_SSH_USER="${USER:-ubuntu}"
 BOARD_SSH_PASS=""
 BOARD_SUDO_PASS=""
 SSH_TIMEOUT=8
-TOLERANCE_S=2        # 系统钟 vs 本机（GCS）基准的允许偏差
+# —— 容差为什么是 5 s 而不是秒级（本工具只需「时间轴/日志能对齐」）——
+#   · 机间 intent 时间戳对齐由 gps_bias 修正：bias = header.stamp − GPS UTC
+#     （swarm_uav_executor/scripts/gps_bias_node.py），接收端 T_own = T_other − bias_other + bias_own
+#     → 两端系统钟偏差在差分里被**抵消**，driver 的 age 检查与绝对钟偏差无关；
+#   · 参考 swarm 规划器要到 10 s 才判「swarm time not synchronized」并丢轨迹
+#     （references/swarm-main/.../ego_replan_fsm.cpp:684）；
+#   · 本机 driver 的 intent 接收窗是 ±30 s（neighbor_intent_stale_s，safety_defaults.yaml）。
+#   2 s 会因 ssh 往返 + 回读耗时误判 FAIL；5 s 留余量，又远小于上述门限。
+TOLERANCE_S=5        # 系统钟 vs 该台写入前现取的本机（GCS）基准的允许偏差
 RTC_TOLERANCE_S=5    # RTC vs 板钟的允许偏差：放宽，含 hwclock 写 + 回读自身的秒级耗时
 IP_PREFIX="192.168.5"
 IP_STRIDE=10
@@ -102,9 +113,9 @@ if [ -z "${BOARD_SSH_USER:-}" ]; then
 fi
 
 # —— 本机时钟自检：把机载改成错的比不改更糟 ——
-NOW=$(date +%s)
-if [ "$NOW" -lt 1600000000 ]; then
-  echo "ERROR: local clock looks wrong (epoch=$NOW, $(date '+%F %T %Z'))." >&2
+LOCAL_NOW=$(date +%s)
+if [ "$LOCAL_NOW" -lt 1600000000 ]; then
+  echo "ERROR: local clock looks wrong (epoch=$LOCAL_NOW, $(date '+%F %T %Z'))." >&2
   echo "       Fix this host clock first (e.g. sudo date -s '@<real epoch>')." >&2
   exit 1
 fi
@@ -256,6 +267,10 @@ printf '%s\n' "-----------------------------------------------------------------
 
 while read -r label ip tuser; do
   [ -n "${label:-}" ] || continue
+  # 基准**逐台现取**：串行修多台时若共用一趟开头的 epoch，靠后的板会被写成「旧 epoch」（板间
+  # 差 = 本轮用时）。现取后每台都贴着本机实时，差异只剩 ssh 往返（~0.5 s），
+  # 台间那一丁点差分由 gps_bias 修正抵消。
+  NOW=$(date +%s)
   remote=$(remote_script "$NOW" "$BOARD_SUDO_PASS" "$RTC_CANDIDATES")
   b64=$(printf '%s' "$remote" | base64 -w0)
 
@@ -282,7 +297,7 @@ while read -r label ip tuser; do
     continue
   fi
 
-  # 验收量 = 板钟相对 **本机（GCS）基准 $NOW** 的偏差；修前/修后差值只说明「走了多少步」，
+  # 验收量 = 板钟相对 **该台写入前现取的基准 $NOW** 的偏差；修前/修后差值只说明「走了多少步」，
   # 不能当验收：板上只差 30 s 时老版本会误报 FAIL（2026-09-14 UAV13 实测，见 tools/README §5）。
   sys_off=$((sys_after - NOW))
   sys_off_abs=${sys_off#-}
@@ -313,7 +328,7 @@ while read -r label ip tuser; do
 
   printf '%-14s %-10s %-21s %-29s %-8s %-10s %s\n' \
          "$label" "${sys_off}s" "$sys_str" "$rtc_time_disp" "${rtc_dev:-none}" "$rtc_disp" "$result"
-  echo "    sys_before=${sys_before} sys_step=${sys_step}s rtc_src=${rtc_src:-none} rtc_before=${rtc_before} adjtime=${adjtime}"
+  echo "    base=${NOW} sys_before=${sys_before} sys_step=${sys_step}s rtc_src=${rtc_src:-none} rtc_before=${rtc_before} adjtime=${adjtime}"
 
   case "$result" in
     PASS|WARN*) ;;
