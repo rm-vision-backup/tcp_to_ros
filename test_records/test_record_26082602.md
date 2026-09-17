@@ -57,7 +57,7 @@ PositionTarget 契约与旧 1m 执行层门禁**全部保留**。
 ## 2. 单元测试
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2
+cd /home/yjq/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash && source devel/setup.bash
 catkin build ego_planner_driver swarm_uav_executor
 catkin test ego_planner_driver swarm_uav_executor tcp_to_ros

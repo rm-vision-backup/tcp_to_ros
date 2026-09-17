@@ -124,8 +124,8 @@ src/tcp_to_ros/test_records/test_record_26082300.md   （方案 B prepare）
 
 ```bash
 # 换设备/换用户名时，只需修改下面三个变量：
-WS=/home/ub20tg/catkin_swarm6-2     # 工作空间根目录（含 src/devel/build）
-PX4_ROOT=/home/ub20tg/PX4_Firmware  # PX4 固件根目录
+WS=/home/yjq/catkin_swarm6-2     # 工作空间根目录（含 src/devel/build）
+PX4_ROOT=/home/yjq/PX4_Firmware  # PX4 固件根目录
 PX4_BUILD="$PX4_ROOT/build/px4_sitl_default"
 
 cd "$WS"
@@ -143,14 +143,14 @@ export ROS_LOG_DIR="$WS/.ros_home/log"
 
 #### 换环境必须修改的硬编码位置（当前使用绝对路径）
 
-> 当前许多脚本/文档写死了 `/home/ub20tg/...`。换设备/换用户名后，除上面三个变量外，
-> 还要改下列文件内的绝对路径（建议全局替换 `/home/ub20tg` 为实际家目录）：
+> 当前许多脚本/文档写死了 `/home/yjq/...`。换设备/换用户名后，除上面三个变量外，
+> 还要改下列文件内的绝对路径（建议全局替换 `/home/yjq` 为实际家目录）：
 
 | 文件 | 硬编码内容 | 说明 |
 |---|---|---|
 | `src/swarm_uav_executor/scripts/startup_offboard_ego.sh` | 第 16-21 行：`ROS_HOME`/`ROS_LOG_DIR`/`WS`/`PX4_ROOT` | 机载层批量启动脚本；换环境必改 |
 | `src/swarm_uav_executor/scripts/offboard_takeoff_15_sitl.py` | `ROS_SETUP`/`WS` 常量 | 起飞脚本；换环境必改 |
-| 本文档内命令 | 每节 `cd /home/ub20tg/catkin_swarm6-2`、`export ...=/home/ub20tg/...` | 复制命令前先替换 |
+| 本文档内命令 | 每节 `cd /home/yjq/catkin_swarm6-2`、`export ...=/home/yjq/...` | 复制命令前先替换 |
 | `references/runtime/` 脚本（若本机运行 runtime） | 运行路径 | 可选，runtime 用相对路径为主 |
 
 > 只依赖 ROS 标准安装（`/opt/ros/noetic`）的路径通常不用改；涉及 `PX4_Firmware`、`catkin_swarm6-2`、

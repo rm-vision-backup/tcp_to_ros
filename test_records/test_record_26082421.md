@@ -15,7 +15,7 @@
 ## 2. 自动化验证
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2
+cd /home/yjq/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 catkin build
@@ -56,7 +56,7 @@ catkin_test_results --all build
 - 清空 `.ros_home` 后启动真实 15 机 PX4 SITL、15 套 onboard、GCS topology bridge/backend，
   验证业务 TCP `39001` 不会被 ROS XML-RPC 随机端口抢占，并执行一次 `prepare`。
 - 证据目录：
-  `/home/ub20tg/catkin_swarm6-2/.ros_home/log/headless_test/prepare_20260824_231608`。
+  `/home/yjq/catkin_swarm6-2/.ros_home/log/headless_test/prepare_20260824_231608`。
 - 关键证据：`result_summary.json`、`07_task_states.bag`、
   `10_UAV5_uav_task_state.csv`、`10_group_a_group_task_state.csv`、
   `10_a05_executor_full.txt`、`10_rosout_matching.txt`、

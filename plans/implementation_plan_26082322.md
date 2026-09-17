@@ -246,7 +246,7 @@ EgoSwarmDriver follower PI
 构建与自动测试命令：
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2
+cd /home/yjq/catkin_swarm6-2
 catkin build ego_planner_driver swarm_uav_executor safe_valley_exp
 catkin test ego_planner_driver swarm_uav_executor
 catkin_test_results --all build

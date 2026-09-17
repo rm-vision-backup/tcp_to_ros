@@ -8,7 +8,7 @@
 
 ## 1. 环境与配置
 
-- workspace：/home/ub20tg/catkin_swarm6-2（PX4 SITL 15 机，无头；源码已回退至 26090802 实施前）
+- workspace：/home/yjq/catkin_swarm6-2（PX4 SITL 15 机，无头；源码已回退至 26090802 实施前）
 - 参与集：A01–A12（reserve A13–A15 在场不参与）
 - 编排：`round_prepare_15sitl.sh --round N --task prepare --timeout-s 150 --keep-ros-home-on-fail 1`
   ＋ `.tmp/scripts/run_5_prepare_matrix.sh`；每轮 clean→隔离 `.ros_home`→sim→onboard 15/15→

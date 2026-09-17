@@ -3,7 +3,7 @@
 时间：2026-09-09 19:40 CST（实施 + 单测 + 受保护 prepare 验收结束）
 记录人：cline-deepseek
 对应实施计划：`plans/implementation_plan_26090900.md`（runtime/当前任务 UAV 集群 brake hold）
-工作空间：`/home/ub20tg/catkin_swarm6-2`
+工作空间：`/home/yjq/catkin_swarm6-2`
 
 ## 0. 摘要
 

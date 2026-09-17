@@ -207,7 +207,7 @@ A/B 后，才允许把 `brake_if_closing` 设为实验默认；`brake_always` �
 在当前工作空间内新增运行日志目录，例如：
 
 ```text
-/home/ub20tg/catkin_swarm6-2/runtime_logs/ego_planner/
+/home/yjq/catkin_swarm6-2/runtime_logs/ego_planner/
   UAV1-ego-planner.log
   UAV2-ego-planner.log
 ```
@@ -434,7 +434,7 @@ relay raw setpoint 和每机 ULog，并保存每机 `UAVn-ego-planner.log`。测
 构建/自动测试基线：
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2
+cd /home/yjq/catkin_swarm6-2
 catkin build swarm_uav_interfaces ego_planner_driver swarm_uav_executor tcp_to_ros safe_valley_exp
 catkin test ego_planner_driver swarm_uav_executor tcp_to_ros
 catkin_test_results --all build

@@ -10,7 +10,7 @@
 
 ## 1. 环境与配置
 
-- workspace：/home/ub20tg/catkin_swarm6-2（PX4 SITL 15 机，无头 `gui:=false`）
+- workspace：/home/yjq/catkin_swarm6-2（PX4 SITL 15 机，无头 `gui:=false`）
 - 参与集：A01–A12（reserve A13–A15 在场不参与 prepare）
 - 编排：`src/swarm_simulation/bashs/round_prepare_15sitl.sh --round N --task prepare
   --timeout-s 150 --keep-ros-home-on-fail 1`（cleanup 内建于 EXIT trap，轮末进程 0 / 端口 clean）

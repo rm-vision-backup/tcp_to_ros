@@ -3,7 +3,7 @@
 时间：2026-09-10 00:09–00:33 CST（5 轮矩阵 00:09–00:29；R4 端口强清补测 00:30–00:33）
 记录人：cline-deepseek
 对应基线：`implementation_plan_26090900.md`（direct BRAKE_HOLD，已实施；首验见 `test_record_26090919.md`）
-工作空间：`/home/ub20tg/catkin_swarm6-2`
+工作空间：`/home/yjq/catkin_swarm6-2`
 
 ## 0. 摘要
 

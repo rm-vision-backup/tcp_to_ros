@@ -3,7 +3,7 @@
 时间：2026-09-11 13:54–14:16 CST
 记录人：cline-deepseek
 对应计划：`plans/implementation_plan_26091101.md`（已实施，见 `test_record_26091103.md`）
-工作空间：`/home/ub20tg/catkin_swarm6-2`
+工作空间：`/home/yjq/catkin_swarm6-2`
 
 ## 0. 摘要
 

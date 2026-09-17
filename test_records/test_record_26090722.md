@@ -6,7 +6,7 @@
 
 ## 1. 环境
 
-- workspace: /home/ub20tg/catkin_swarm6-2（PX4 SITL 15 机，无头）
+- workspace: /home/yjq/catkin_swarm6-2（PX4 SITL 15 机，无头）
 - tcp_to_ros commit: `4b8cb26`
 - d_ij（排程预测安全距离）: 2.0m
 - runtime accept_timeout: 5s

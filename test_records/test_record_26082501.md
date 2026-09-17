@@ -2,7 +2,7 @@
 
 时间：2026-08-25 01:xx CST（持续更新）  
 对应计划：`plans/implementation_plan_26082500.md`  
-工作空间：`/home/ub20tg/catkin_swarm6-2`
+工作空间：`/home/yjq/catkin_swarm6-2`
 
 ## 0. 记录原则
 
@@ -45,7 +45,7 @@
 执行：
 
 ```bash
-cd /home/ub20tg/catkin_swarm6-2
+cd /home/yjq/catkin_swarm6-2
 source /opt/ros/noetic/setup.bash
 source devel/setup.bash
 catkin build ego_planner_driver swarm_uav_executor safe_valley_exp
@@ -70,7 +70,7 @@ swarm_uav_executor tcp_to_ros` 全部成功；`catkin_test_results --all build` 
 0 failures**（ego 96、executor 82、tcp 27）。测试阶段的 catkin warnings 为既有测试 stderr 汇总。
 
 流程偏差：该次 rostest 未在命令行重复导出 `ROS_HOME`，rostest 在工作区外
-`/home/ub20tg/.ros/log/` 生成日志。未擅自删除工作区外文件；后续测试命令强制导出工作区
+`/home/yjq/.ros/log/` 生成日志。未擅自删除工作区外文件；后续测试命令强制导出工作区
 `ROS_HOME`/`ROS_LOG_DIR`。
 
 ### 2.3 阶段结论

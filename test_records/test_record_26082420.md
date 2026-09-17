@@ -38,7 +38,7 @@
 
 - 步骤：
   ```bash
-  cd /home/ub20tg/catkin_swarm6-2
+  cd /home/yjq/catkin_swarm6-2
   source /opt/ros/noetic/setup.bash && source devel/setup.bash
   python3 references/runtime/task_test.py --backend tcp --group A --task prepare \
     --tcp-host 127.0.0.1 --tcp-port 39001 --timeout-s 180

@@ -3,7 +3,7 @@
 时间：2026-09-11 03:30–03:56 CST（实施 + 自动测试 + 单轮 15-UAV prepare SITL 回归）
 记录人：cline-deepseek
 对应计划：`plans/implementation_plan_26091101.md`（原点校准集合参数化与实机多主部署适配）
-工作空间：`/home/ub20tg/catkin_swarm6-2`
+工作空间：`/home/yjq/catkin_swarm6-2`
 
 ## 0. 摘要
 
