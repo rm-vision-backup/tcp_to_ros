@@ -1,0 +1,40 @@
+# A 组 4 机工程测试专用编队配置（A06 领机 + A08/A10/A12 跟随，2x2，间距 5.0 m）
+#
+# 为什么不复用 config/formation_offsets.yaml：该文件的 leader_id 是全局单值
+# （A01），而 gcs_a_backend_node.py 对 FOLLOW_ROUTE 强制 leader_id == formation_leader；
+# 本测试的四架里没有 A01。该文件同时驱动 12/15 机流程，且
+# test/test_fixed_formations.py 断言其 leader == "A01"，故不改动。
+#
+# 通过 gcs_a_real_four_uav.launch 传入本文件（formation_offsets_file 参数）。
+#
+# offboard 语义：offset 是相对领机的 ENU 增量，不随领机 yaw 旋转
+# （gcs_a_backend_node.py:1243-1246 只按冻结的参考航向换算），
+# 因此跟随者两两间距在领机机动时保持不变，只有差动跟踪误差会改变它。
+#
+# 间距 5.0 m：执行层实时门禁 min_center_distance_m = 1.0
+# （swarm_uav_executor/config/ego_swarm_defaults.yaml:11），留 4.0 m 余量，
+# 与已验证的 formation_1（5 m 栅格）同级。
+
+leader_id: A06
+mission_anchor: [0.0, 0.0, 0.0]
+
+formations:
+  formation_4uav:
+    participants: [A06, A08, A10, A12]
+    offsets:
+      A06: [0.0, 0.0, 0.0]
+      A08: [5.0, 0.0, 0.0]
+      A10: [0.0, 5.0, 0.0]
+      A12: [5.0, 5.0, 0.0]
+
+  # 以下两条供 1 机 / 2 机分步验证使用，免去再改地面站配置。
+  formation_2uav:
+    participants: [A06, A08]
+    offsets:
+      A06: [0.0, 0.0, 0.0]
+      A08: [5.0, 0.0, 0.0]
+
+  formation_1uav:
+    participants: [A06]
+    offsets:
+      A06: [0.0, 0.0, 0.0]

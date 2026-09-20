@@ -1,0 +1,51 @@
+<launch>
+  <!-- A 组 4 机工程测试专用地面站入口（A06/A08/A10/A12）。
+
+       为什么不直接 include gcs_a_real.launch：
+       gcs_a_backend.launch 把 config/calibration_defaults.yaml 加载进
+       gcs_a_calibration 的私有命名空间，父 launch 无法覆盖它（节点私有加载在后、优先生效）。
+       所以本文件自行展开四段：bridge / backend / calibration / tcp_server。
+
+       !!! 本文件是 gcs_a_real.launch + gcs_a_backend.launch 的展开副本。
+       每次使用前请与源文件逐段比对，确认没有漏掉上游新增的参数或节点。!!!
+       源：tcp_to_ros/launch/gcs_a_real.launch（bridge / backend include / tcp_server）
+           tcp_to_ros/launch/gcs_a_backend.launch（backend 节点 / calibration 节点）
+
+       与 15 机流程的差异只有两处，且都是指向本测试专用配置文件：
+         - backend 的 formation_offsets_file -> config/formation_offsets_four_uav.yaml
+         - calibration 的 calibration_uavs/all_uavs 来源 -> config/calibration_four_uav.yaml
+       安全门禁、身份映射、topology、端口全部沿用生产配置，不做任何改动。 -->
+
+  <arg name="topology_config" default="$(find swarm_topology_bridge)/config/topology.yaml" />
+  <arg name="tcp_port" default="39001" />
+  <arg name="map_file" default="$(find tcp_to_ros)/config/uav_identity_map.yaml" />
+  <arg name="formation_offsets_file" default="$(find tcp_to_ros)/config/formation_offsets_four_uav.yaml" />
+  <arg name="calibration_config_file" default="$(find tcp_to_ros)/config/calibration_four_uav.yaml" />
+
+  <!-- 1. 实机 bridge（先于依赖远端 topic/service 的业务节点就绪） -->
+  <include file="$(find swarm_topology_bridge)/launch/bridge_group_a_real.launch">
+    <arg name="config" value="$(arg topology_config)" />
+    <arg name="uav_name" value="GCS_A" />
+  </include>
+
+  <!-- 2. GCS_A 整组分发后端（等价 gcs_a_backend.launch，formation_offsets_file 指向四机配置） -->
+  <node pkg="tcp_to_ros" type="gcs_a_backend_node.py" name="gcs_a_backend_node" output="screen">
+    <rosparam command="load" file="$(find tcp_to_ros)/config/backend_defaults.yaml" />
+    <param name="map_file" value="$(arg map_file)" />
+    <param name="formation_offsets_file" value="$(arg formation_offsets_file)" />
+  </node>
+
+  <!-- 3. 原点校准（等价 gcs_a_backend.launch 的 calibration 节点，
+        但 calibration_uavs/all_uavs 改由四机配置文件提供） -->
+  <node pkg="tcp_to_ros" type="gcs_a_calibration_node.py"
+        name="gcs_a_calibration" output="screen" required="true">
+    <rosparam command="load" file="$(arg calibration_config_file)" />
+    <param name="identity_file" value="$(arg map_file)" />
+  </node>
+
+  <!-- 4. TCP server（transport 默认来自 transport_defaults.yaml） -->
+  <node pkg="tcp_to_ros" type="tcp_server_node.py" name="tcp_server_node" output="screen">
+    <rosparam command="load" file="$(find tcp_to_ros)/config/transport_defaults.yaml" />
+    <param name="port" value="$(arg tcp_port)" />
+  </node>
+</launch>

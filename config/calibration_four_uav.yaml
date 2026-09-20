@@ -1,0 +1,15 @@
+# A 组 4 机工程测试专用标定集合（A06/A08/A10/A12 -> UAV6/UAV8/UAV10/UAV12）
+#
+# 必须写执行层 UAVn，不能写任务层 Axx：
+# gcs_a_backend.launch 把 identity_file 设为 uav_identity_map.yaml，
+# calibration.py:validate_calibration_config 据此要求每一项都是存在的 exec_target。
+# 写成 A06 会在节点启动时直接 ValueError。
+#
+# 通过 gcs_a_real_four_uav.launch 传入（该 launch 自行展开 calibration 节点并加载本文件）。
+#
+# 注意：calibration_uavs 成员必须在线且处于 disarm，global/local pose 连续采样 2 s，
+# 四机航向差 <= 30 度，才能冻结原点。冻结的原点是这四机全球位置的中位数，
+# 即物理阵位的几何中心 —— 这正是 prepare 目标坐标取 (+-2.5, +-2.5) 的原因。
+
+calibration_uavs: [UAV6, UAV8, UAV10, UAV12]
+all_uavs: [UAV6, UAV8, UAV10, UAV12]
