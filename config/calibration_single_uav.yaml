@@ -1,0 +1,15 @@
+# A 组单机预验证专用标定集合（只有 A06 -> 执行层 UAV6）
+#
+# 必须写执行层 UAVn，不能写任务层 A06：identity_file 指向 uav_identity_map.yaml，
+# calibration.py 的 validate_calibration_config 要求每一项都是存在且 enabled 的 exec_target。
+#
+# 为什么不能复用 calibration_four_uav.yaml：ready 要求 calibration_uavs 全部回读
+# gp_origin_confirmed（gcs_a_calibration_node.py:163-169），四机那份会永远等不到
+# UAV8/UAV10/UAV12 → calibration_ready 恒假 → 任务被 CALIBRATION_NOT_READY 拒
+# （gcs_a_backend_node.py:513-519）。
+#
+# 单机标定行为：冻结的原点 = 该机自身全球位置（中位数只有一个元素），参考航向 = 它自己的
+# 机头朝向；仍是"必须 disarm 且位姿连续采样 2 s 才冻结"（gcs_a_calibration_node.py:114-134）。
+
+calibration_uavs: [UAV6]
+all_uavs: [UAV6]

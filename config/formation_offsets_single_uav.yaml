@@ -1,0 +1,21 @@
+# A 组单机预验证专用编队配置（只有 A06 一架）
+#
+# 与 formation_offsets_four_uav.yaml:37-40 的 formation_1uav 同义（participants [A06]、
+# 零偏移）。独立成文的原因：单机预验证不依赖四机文件的后续改动。
+#
+# MOVE_TO 不校验 leader（gcs_a_backend_node.py 只对 FOLLOW_ROUTE 校验
+# leader_id == formation_leader），leader_id 写 A06 是为了与四机文件保持一致、便于对照。
+#
+# 语义：offset 是相对领机的 ENU 增量，不随领机 yaw 旋转（gcs_a_backend_node.py:1243-1246
+# 只按冻结的参考航向换算）。单机时标定冻结的原点 = 该机自身全球位置，所以 A06 在任务
+# 坐标里起点就是 (0,0)，package/plans/plans.json 的 prepare 目标 (-2.5,-2.5,12) 对应
+# 真实 3.54 m 平移 —— 远大于排程的 1e-6 m 拒发门槛（time_offset_scheduler.py:717-728）。
+
+leader_id: A06
+mission_anchor: [0.0, 0.0, 0.0]
+
+formations:
+  formation_1uav:
+    participants: [A06]
+    offsets:
+      A06: [0.0, 0.0, 0.0]

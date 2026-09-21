@@ -1,0 +1,30 @@
+<launch>
+  <!-- A 组单机预验证地面站入口（A06 -> 执行层 UAV6）。
+       用途：四机集群上真机前，先让一架走一遍"起飞 + 准备编队"。
+
+       本文件是**薄 wrapper**：只把两个配置指向单机版，其余（bridge / backend /
+       calibration / tcp_server、身份映射、生产 topology、端口、安全门禁）全部沿用
+       四机实机入口 gcs_a_real_four_uav.launch —— 即生产共享配置，未做任何改动。
+
+       与四机入口的差异仅两处：
+         - backend 的 formation_offsets_file -> config/formation_offsets_single_uav.yaml
+         - calibration 的集合来源 -> config/calibration_single_uav.yaml（[UAV6]）
+
+       用法（GCS_A 机器，hostname 须为 GCS_A）：
+         roslaunch tcp_to_ros gcs_a_real_single_uav.launch -->
+
+  <arg name="topology_config"
+       default="$(find swarm_topology_bridge)/config/topology.yaml" />
+  <arg name="tcp_port" default="39001" />
+  <arg name="formation_offsets_file"
+       default="$(find tcp_to_ros)/config/formation_offsets_single_uav.yaml" />
+  <arg name="calibration_config_file"
+       default="$(find tcp_to_ros)/config/calibration_single_uav.yaml" />
+
+  <include file="$(find tcp_to_ros)/launch/gcs_a_real_four_uav.launch">
+    <arg name="topology_config" value="$(arg topology_config)" />
+    <arg name="tcp_port" value="$(arg tcp_port)" />
+    <arg name="formation_offsets_file" value="$(arg formation_offsets_file)" />
+    <arg name="calibration_config_file" value="$(arg calibration_config_file)" />
+  </include>
+</launch>
