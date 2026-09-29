@@ -1,5 +1,8 @@
 <launch>
-  <!-- A 组 4 机工程测试专用地面站入口（A06/A08/A10/A12）。
+  <!-- A 组 4 机工程测试专用地面站入口（A08 领机 / A10 / A12 / A13）。
+       席位变更史：原 4 机线为 A06/A08/A10/A12；6 号机炸机后由 A13 顶替其角位；
+       12 号机 GPS 一度故障（RTK 模块坏，已修复）期间用过 3 机版；
+       2026-09-23 恢复 4 机：A08 领机 + A10/A12/A13。
 
        为什么不直接 include gcs_a_real.launch：
        gcs_a_backend.launch 把 config/calibration_defaults.yaml 加载进
