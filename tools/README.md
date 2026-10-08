@@ -43,13 +43,13 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 |---|---|---|
 | 飞控 | `fcu/ulog_list.txt`（全清单，含 GPS UTC）、`fcu/log_<id>.ulg`（最新 N 条）、`fcu/ulog_fetch.log` | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（固定 UDP `:15500`） |
 | 机载 | `onboard/ros_home/<session>/`（rosout、各节点、master、roslaunch） | ssh：`~/catkin_swarm6-2/.ros_home/log/<最新 session>/` |
-| 机载 | `onboard/ego_planner/*.log`（planner 诊断，即 `diagnostic_log_dir`） | ssh：`~/catkin_swarm6-2/runtime_logs/ego_planner/` |
+| 机载 | `onboard/ego_planner/*.log`（planner 诊断，即 `diagnostic_log_dir`） | ssh：`~/catkin_swarm6-2/.ros_home/log/ego_planner/` |
 | 机载 | `onboard/term/*_offboard_ego.log`（终端全量转录，§5.1.2 方式 B） | ssh：`~/catkin_swarm6-2/.tmp/logs/` |
-| 机载 | `onboard/health/*.jsonl`（**数据面观测/事件**：`<UAV>_bridge_health.jsonl`（per-topic 到达间隔/停顿/连接事件）+ `<UAV>_follower_events.jsonl` / `<UAV>_relay_events.jsonl`；2026-10-08 增） | ssh：`~/catkin_swarm6-2/.runtime_logs/health/` |
+| 机载 | `onboard/health/*.jsonl`（**数据面观测/事件**：`<UAV>_bridge_health.jsonl`（per-topic 到达间隔/停顿/连接事件）+ `<UAV>_follower_events.jsonl` / `<UAV>_relay_events.jsonl`；2026-10-08 增） | ssh：`~/catkin_swarm6-2/.ros_home/log/health/` |
 
 **注意（2026-10-08 增）**：`onboard/health/*.jsonl` 是追加写的固定文件名，机上超过 cap（默认 32 MB）
 时只保留**尾部**——即最近一次任务的数据，正是要的；解析时首行可能是半行，按 JSONL 逐行容错即可。
-**GCS_A 侧的观测文件不在本脚本范围内**：`<GCS 工作区>/.runtime_logs/health/*.jsonl`（GCS 自己的 bridge
+**GCS_A 侧的观测文件不在本脚本范围内**：`<GCS 工作区>/.ros_home/log/health/*.jsonl`（GCS 自己的 bridge
 也写健康日志，"GCS 是否也丢了同一台机的 odom"是定层的关键交叉证据），请随 GCS 侧日志一起手工归档。
 
 **本轮不收**（有意跳过）：nsh 快照（需要时按 §3 手动跑）、本机 GCS_A 侧 `.ros_home`、

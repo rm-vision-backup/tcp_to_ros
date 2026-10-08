@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 日志下载：一轮把一台（或多台）UAV 的日志收到本机（飞控 ulog + 机载 ROS / 终端日志）。
 # 采集范围（本轮定稿的最小档）：① 飞控 PX4 ulog（MAVLink，固定 UDP :15500）+ ulog 全清单；
-# ② 机载 .ros_home/log/<最新 session>/、runtime_logs/ego_planner/*、.tmp/logs/*_offboard_ego.log。
+# ② 机载 .ros_home/log/ 下的：<最新 session>/、ego_planner/*、health/*、.tmp/logs/*_offboard_ego.log。
 # 不收：nsh 快照、本机 GCS 侧日志、旧 launch 旁路日志（机上 ~/.tmp/*.log，如 px4_multi.log）。
 #   范围与理由见 tools/README.md §2「本轮不收」；时间基陷阱见 §6 坑 5。
 # Usage:
@@ -143,7 +143,10 @@ emit_file() {   # $1 = 归档内相对路径；$2 = 机上绝对路径
 # ① ROS 会话日志（最新 session 整份；latest 是符号链接，优先跟它）
 sess=$(readlink -f "$ws/.ros_home/log/latest" 2>/dev/null || true)
 if [ ! -d "$sess" ]; then
-  sess=$(ls -1dt "$ws/.ros_home/log"/*/ 2>/dev/null | grep -v '/latest/$' | head -1 || true)
+  # 兜底按 mtime 挑最新目录时，必须排除我们自己的常驻目录：health/ 一直在写、
+  # mtime 最新，不排除会被当成 session 整份打包（ego_planner/ 同理）。
+  sess=$(ls -1dt "$ws/.ros_home/log"/*/ 2>/dev/null \
+         | grep -v -e '/latest/$' -e '/health/$' -e '/ego_planner/$' | head -1 || true)
 fi
 sess=${sess%/}
 if [ -n "$sess" ] && [ -d "$sess" ]; then
@@ -156,9 +159,9 @@ else
 fi
 
 # ② planner 诊断（优先 <hostname>-ego-planner.log，否则该目录最新一份）
-plog="$ws/runtime_logs/ego_planner/$hn-ego-planner.log"
+plog="$ws/.ros_home/log/ego_planner/$hn-ego-planner.log"
 if [ ! -f "$plog" ]; then
-  plog=$(ls -1t "$ws/runtime_logs/ego_planner"/*.log 2>/dev/null | head -1 || true)
+  plog=$(ls -1t "$ws/.ros_home/log/ego_planner"/*.log 2>/dev/null | head -1 || true)
 fi
 if [ -n "$plog" ] && [ -f "$plog" ]; then
   emit_file "onboard/ego_planner/${plog##*/}" "$plog"
@@ -175,15 +178,15 @@ for f in "$ws/.tmp/logs/"*_offboard_ego.log; do
 done
 [ "$found" -eq 0 ] && printf '!!! onboard/term missing\n'
 
-# ④ 观测/事件日志（2026-10-08 增，落隐藏目录 .runtime_logs/health）：bridge 数据面健康（per-topic 到达间隔/停顿/连接事件）
-#    与执行器侧事件（跟随环首帧/超时、relay 选源与 HOLD）。固定文件名、追加写，
-#    超 cap 时 emit_file 只留尾部——正是要的近期数据（首行可能是半行）。
+# ④ 观测/事件日志（2026-10-08 增；2026-10-08 晚随其余运行日志统一移入 .ros_home/log/health/）：
+#    bridge 数据面健康（per-topic 到达间隔/停顿/连接事件）与执行器侧事件（跟随环首帧/超时、
+#    relay 选源与 HOLD）。固定文件名、追加写，超 cap 时 emit_file 只留尾部——正是要的近期数据。
 found=0
 # 宽匹配 *_events.jsonl：组件名（follower / relay / …）随实现变，采集不该与文件名耦合。
 # 2026-10-08 四机 SITL 彩排实测：跟随环写的是 <UAV>_follower_events.jsonl，早前写的
 # *_executor_events.jsonl 会漏收。
-for f in "$ws/.runtime_logs/health/"*_bridge_health.jsonl \
-         "$ws/.runtime_logs/health/"*_events.jsonl; do
+for f in "$ws/.ros_home/log/health/"*_bridge_health.jsonl \
+         "$ws/.ros_home/log/health/"*_events.jsonl; do
   [ -f "$f" ] || continue
   found=1
   emit_file "onboard/health/${f##*/}" "$f"
