@@ -23,7 +23,7 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 
 | 文件 | 用途 |
 |---|---|
-| `log_fetch.sh` | **日志下载（推荐入口）**：一轮收全飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录 |
+| `log_fetch.sh` | **日志下载（推荐入口）**：一轮收全飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录 + 数据面观测/事件日志 |
 | `fcu_ulog_list.py` | 列飞控 SD 上的 ulog 清单（`LOG_REQUEST_LIST`），并把 `time_utc` 换算成本地时刻 |
 | `fcu_ulog_fetch.py` | 下载 ulog（`LOG_REQUEST_DATA` 分块 + 断点续传 + 进度 + stall 重试） |
 | `fcu_nsh.py` | 跑**只读** PX4 nsh 命令（`ls` / `mount` / `param show ...`），走 `SERIAL_CONTROL`；**不在下载链里**（见 §3.1） |
@@ -45,6 +45,12 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 | 机载 | `onboard/ros_home/<session>/`（rosout、各节点、master、roslaunch） | ssh：`~/catkin_swarm6-2/.ros_home/log/<最新 session>/` |
 | 机载 | `onboard/ego_planner/*.log`（planner 诊断，即 `diagnostic_log_dir`） | ssh：`~/catkin_swarm6-2/runtime_logs/ego_planner/` |
 | 机载 | `onboard/term/*_offboard_ego.log`（终端全量转录，§5.1.2 方式 B） | ssh：`~/catkin_swarm6-2/.tmp/logs/` |
+| 机载 | `onboard/health/*.jsonl`（**数据面观测/事件**：bridge per-topic 到达间隔/停顿/连接事件、执行器跟随环与 relay 事件；2026-10-08 增） | ssh：`~/catkin_swarm6-2/runtime_logs/health/` |
+
+**注意（2026-10-08 增）**：`onboard/health/*.jsonl` 是追加写的固定文件名，机上超过 cap（默认 32 MB）
+时只保留**尾部**——即最近一次任务的数据，正是要的；解析时首行可能是半行，按 JSONL 逐行容错即可。
+**GCS_A 侧的观测文件不在本脚本范围内**：`<GCS 工作区>/runtime_logs/health/*.jsonl`（GCS 自己的 bridge
+也写健康日志，"GCS 是否也丢了同一台机的 odom"是定层的关键交叉证据），请随 GCS 侧日志一起手工归档。
 
 **本轮不收**（有意跳过）：nsh 快照（需要时按 §3 手动跑）、本机 GCS_A 侧 `.ros_home`、
 **旧 launch 的旁路日志**（机上 `~/.tmp/*.log`，如 `px4_multi.log`、`offb_hover*.log`：

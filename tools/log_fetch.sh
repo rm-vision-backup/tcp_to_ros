@@ -174,6 +174,19 @@ for f in "$ws/.tmp/logs/"*_offboard_ego.log; do
   emit_file "onboard/term/${f##*/}" "$f"
 done
 [ "$found" -eq 0 ] && printf '!!! onboard/term missing\n'
+
+# ④ 观测/事件日志（2026-10-08 增）：bridge 数据面健康（per-topic 到达间隔/停顿/连接事件）
+#    与执行器侧事件（跟随环首帧/超时、relay 选源与 HOLD）。固定文件名、追加写，
+#    超 cap 时 emit_file 只留尾部——正是要的近期数据（首行可能是半行）。
+found=0
+for f in "$ws/runtime_logs/health/"*_bridge_health.jsonl \
+         "$ws/runtime_logs/health/"*_executor_events.jsonl \
+         "$ws/runtime_logs/health/"*_relay_events.jsonl; do
+  [ -f "$f" ] || continue
+  found=1
+  emit_file "onboard/health/${f##*/}" "$f"
+done
+[ "$found" -eq 0 ] && printf '!!! onboard/health missing\n'
 printf '### done\n'
 REMOTE
 }
@@ -259,6 +272,7 @@ emit_readme() {   # $1 label $2 ip $3 mav $4 ssh_user $5 host $6 epoch $7 date
 | \`onboard/ros_home/<session>/\` | ssh | ROS 会话日志（rosout、各节点、master、roslaunch） |
 | \`onboard/ego_planner/*.log\` | ssh | planner 诊断（机上超 32 MB 时只留尾部，见 manifest） |
 | \`onboard/term/*_offboard_ego.log\` | ssh | 终端全量转录（way B），漏设 \`UAV\` 时文件名为 \`_offboard_ego.log\` |
+| \`onboard/health/*.jsonl\` | ssh | 数据面观测：bridge per-topic 到达间隔/停顿/连接事件、执行器跟随环与 relay 事件（超 32 MB 只留尾部，首行可能半行） |
 | \`onboard/ssh.err\` | ssh | 仅在有 stderr 输出时存在 |
 | \`manifest.txt\` | — | 逐项状态/来源/字节/md5（\`MISSING\`/\`FAIL\` 都在这里） |
 | \`md5sums.txt\` | — | \`md5sum -c\` 校验用 |
