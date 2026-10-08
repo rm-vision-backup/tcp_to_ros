@@ -179,9 +179,11 @@ done
 #    与执行器侧事件（跟随环首帧/超时、relay 选源与 HOLD）。固定文件名、追加写，
 #    超 cap 时 emit_file 只留尾部——正是要的近期数据（首行可能是半行）。
 found=0
+# 宽匹配 *_events.jsonl：组件名（follower / relay / …）随实现变，采集不该与文件名耦合。
+# 2026-10-08 四机 SITL 彩排实测：跟随环写的是 <UAV>_follower_events.jsonl，早前写的
+# *_executor_events.jsonl 会漏收。
 for f in "$ws/runtime_logs/health/"*_bridge_health.jsonl \
-         "$ws/runtime_logs/health/"*_executor_events.jsonl \
-         "$ws/runtime_logs/health/"*_relay_events.jsonl; do
+         "$ws/runtime_logs/health/"*_events.jsonl; do
   [ -f "$f" ] || continue
   found=1
   emit_file "onboard/health/${f##*/}" "$f"
