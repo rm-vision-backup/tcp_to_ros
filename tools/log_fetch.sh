@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # 日志下载：一轮把一台（或多台）UAV 的日志收到本机（飞控 ulog + 机载 ROS / 终端日志）。
-# 采集范围（本轮定稿的最小档）：① 飞控 PX4 ulog（MAVLink，固定 UDP :15500）+ ulog 全清单；
-# ② 机载 .ros_home/log/ 下的：<最新 session>/、ego_planner/*、health/*、.tmp/logs/*_offboard_ego.log。
+# 采集范围（2026-10-09 定稿）：**默认只采"我们自己程序"记的日志**——机载 .ros_home/log/ 下的
+# <最新 session>/、ego_planner/*、health/*、.tmp/logs/*_offboard_ego.log。
+#   飞控 PX4 ulog（MAVLink，固定 UDP :15500）**默认不采**：那是飞控自己记的、体积大且慢，
+#   需要时用独立工具（tools/fcu_ulog_list.py / fcu_ulog_fetch.py）或直接接线读；
+#   确实要走 MAVLink 时加 `--ulog` 恢复旧行为（含 ulog 全清单 + `-n N` 下载）。
 # 不收：nsh 快照、本机 GCS 侧日志、旧 launch 旁路日志（机上 ~/.tmp/*.log，如 px4_multi.log）。
 #   范围与理由见 tools/README.md §2「本轮不收」；时间基陷阱见 §6 坑 5。
 # Usage:
 #   log_fetch.sh [选项] <目标> [目标 ...]
 #   log_fetch.sh 7                                  # 收 UAV7
-#   log_fetch.sh -n 3 1 2 6 14                      # 每台取最新 3 条 ulog
+#   log_fetch.sh --ulog -n 3 1 2 6 14               # 带飞控 ulog：每台取最新 3 条
 #   LOG_OUT=~/Downloads/flight_logs log_fetch.sh 1 2 6 14
 # 目标写法：裸数字（7）= UAVn，同时定飞控 MAVLink（sys=n, comp=1）与本机推 IP 规则
 #   （IP_PREFIX.IP_STRIDE*n+IP_OFFSET）；也接受 UAV7、uav7、区间 1-6、host、user@host。
 # Options:
-#   -n N      每台取最新 N 条 ulog（默认 1；0 = 只列清单不下载）
+#   --ulog    同时走飞控 MAVLink 采 ulog（默认关；见上"采集范围"）
+#   -n N      每台取最新 N 条 ulog（仅 --ulog 时有效；默认 1；0 = 只列清单不下载）
 #   -c FILE   参数文件（默认 <tools>/configs/onboard.env：机载账号/密码 + IP 规则）
 #   -t SEC    ssh 连接超时秒数（覆盖参数文件）
 #   -u USER   ssh 登录用户（覆盖参数文件）
-#   -s        跳过机载阶段（只收飞控 ulog）
+#   -s        跳过机载阶段（只收飞控 ulog；需配 --ulog）
 #   -h        本帮助
 # 输出：$LOG_OUT/<UAVn_YYYY-MM-DD_HHMM>/（LOG_OUT 默认当前目录），内含 fcu/、onboard/{ros_home,
 #   ego_planner,term}/，并生成 manifest.txt（逐项状态/来源/字节/md5）、README.md、md5sums.txt。
@@ -31,6 +35,7 @@ LOG_OUT="${LOG_OUT:-$PWD}"
 CAP_BYTES=$((32 * 1024 * 1024))   # 大文件（planner / 终端转录）上限：超了取尾部（硬编码，不做开关）
 
 ULOG_N=1
+DO_FCU=0
 DO_SSH=1
 CONFIG="$DEFAULT_CONFIG"
 SSH_TIMEOUT=8
@@ -50,6 +55,7 @@ while [ $# -gt 0 ]; do
     -t) SSH_TIMEOUT="${2:-}" ; shift ;;
     -u) BOARD_SSH_USER="${2:-}" ; shift ;;
     -s) DO_SSH=0 ;;
+    --ulog) DO_FCU=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 1 ;;
     *) TARGETS+=("$1") ;;
@@ -64,6 +70,10 @@ if [ "${#TARGETS[@]}" -eq 0 ]; then
 fi
 if ! [[ "$ULOG_N" =~ ^[0-9]+$ ]]; then
   echo "ERROR: -n expects a non-negative integer, got '$ULOG_N'" >&2
+  exit 1
+fi
+if [ "$DO_SSH" -eq 0 ] && [ "$DO_FCU" -eq 0 ]; then
+  echo "ERROR: -s（只收飞控 ulog）需要同时给 --ulog；默认只采机载日志，-s 单独用会什么都不采" >&2
   exit 1
 fi
 if ! [[ "$SSH_TIMEOUT" =~ ^[0-9]+$ ]] || [ "$SSH_TIMEOUT" -lt 1 ]; then
@@ -274,9 +284,7 @@ emit_readme() {   # $1 label $2 ip $3 mav $4 ssh_user $5 host $6 epoch $7 date
 
 | 路径 | 来源 | 说明 |
 |---|---|---|
-| \`fcu/ulog_list.txt\` | MAVLink | PX4 \`LOG_ENTRY\` 全清单（含 GPS UTC 真时刻） |
-| \`fcu/log_*.ulg\` | MAVLink | PX4 ulog（\`-n N\` 指定的最新 N 条；断点续传） |
-| \`fcu/ulog_fetch.log\` | MAVLink | 下载过程日志（进度 / stall 重试痕迹） |
+${FCU_ROWS}
 | \`onboard/ros_home/<session>/\` | ssh | ROS 会话日志（rosout、各节点、master、roslaunch） |
 | \`onboard/ego_planner/*.log\` | ssh | planner 诊断（机上超 32 MB 时只留尾部，见 manifest） |
 | \`onboard/term/*_offboard_ego.log\` | ssh | 终端全量转录（way B），漏设 \`UAV\` 时文件名为 \`_offboard_ego.log\` |
@@ -290,7 +298,7 @@ emit_readme() {   # $1 label $2 ip $3 mav $4 ssh_user $5 host $6 epoch $7 date
 \`\`\`bash
 cd "\$(dirname "\$0")" 2>/dev/null || cd .
 md5sum -c md5sums.txt
-ulog_info fcu/log_*.ulg          # duration / No Dropouts
+${ULOG_HINT}less manifest.txt                # 缺什么、为什么缺
 less manifest.txt                # 缺什么、为什么缺
 \`\`\`
 EOF
@@ -344,14 +352,27 @@ parse_stream() {   # $1 = 抓到的流文件；$2 = 目标目录；解 base64 �
 
 # —— 主流程：多目标串行（:15500 是所有机载 routerd 共用的一个端口，ulog 不能并行取）——
 STAMP=$(date +%Y-%m-%d_%H%M)
-CMDLINE="LOG_OUT=$LOG_OUT $(basename "$0") -n $ULOG_N$([ "$DO_SSH" -eq 0 ] && echo ' -s') ${TARGETS[*]}"
+CMDLINE="LOG_OUT=$LOG_OUT $(basename "$0")$([ "$DO_FCU" -eq 1 ] && echo " --ulog -n $ULOG_N")$([ "$DO_SSH" -eq 0 ] && echo ' -s') ${TARGETS[*]}"
+if [ "$DO_FCU" -eq 1 ]; then
+  FCU_ROWS='| `fcu/ulog_list.txt` | MAVLink | PX4 `LOG_ENTRY` 全清单（含 GPS UTC 真时刻） |
+| `fcu/log_*.ulg` | MAVLink | PX4 ulog（`-n N` 指定的最新 N 条；断点续传） |
+| `fcu/ulog_fetch.log` | MAVLink | 下载过程日志（进度 / stall 重试痕迹） |'
+else
+  FCU_ROWS='| （本次未采飞控 ulog：默认只采我们程序记的日志；需要时加 `--ulog`，或自行接线读） | — | — |'
+fi
+if [ "$DO_FCU" -eq 1 ]; then
+  ULOG_HINT='ulog_info fcu/log_*.ulg          # duration / No Dropouts\n'
+else
+  ULOG_HINT=""
+fi
 TARGET_FAILED=0
 status=0
 
 while read -r label ip tuser mavg; do
   [ -n "${label:-}" ] || continue
   out="$LOG_OUT/${label}_${STAMP}"
-  mkdir -p "$out/fcu" "$out/onboard/ros_home" "$out/onboard/ego_planner" "$out/onboard/term"
+  mkdir -p "$out/onboard/ros_home" "$out/onboard/ego_planner" "$out/onboard/term"
+  [ "$DO_FCU" -eq 1 ] && mkdir -p "$out/fcu"
   : >"$out/.facts"; : >"$out/.notes"
   [ "$tuser" = "-" ] && tuser=""     # '-' 占位符 = 用参数文件里的 BOARD_SSH_USER
   printf '== %s（%s，MAVLink %s）-> %s\n' "$label" "$ip" "$mavg" "$out"
@@ -377,8 +398,10 @@ while read -r label ip tuser mavg; do
     fi
   fi
 
-  # ② 飞控：ulog 全清单（F2）+ 最新 N 条 ulog（F1）
-  if [ "$mavg" = "-" ]; then
+  # ② 飞控：ulog 全清单（F2）+ 最新 N 条 ulog（F1）——默认关，--ulog 才走（见文件头"采集范围"）
+  if [ "$DO_FCU" -eq 0 ]; then
+    :
+  elif [ "$mavg" = "-" ]; then
     printf 'MISSING|mavlink|fcu|-|-|target %s has no UAV number (no FCU sysid)\n' "$label" \
            >>"$out/.notes"
   else
