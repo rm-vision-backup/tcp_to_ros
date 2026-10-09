@@ -197,7 +197,10 @@ REMOTE
 }
 
 run_remote() {   # $1 = ip；$2 = base64 后的远端脚本；$3 = ssh 用户
-  local -a cmd=(ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null"
+  # -n：ssh 不得读本地 stdin。主循环把目标清单放在 here-string 上（done <<<"$TARGET_LINES"），
+  # ssh 一读就把后续目标行吃光——表现为"多目标只采第一台"（2026-10-09 三机采集实测：
+  # 只落 UAV8，却仍打印"3 个目标"）。与 onboard_ctl.sh 的多目标坑同类，详见 four_uav README §八。
+  local -a cmd=(ssh -n -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null"
                 -o "ConnectTimeout=$SSH_TIMEOUT" -o "NumberOfPasswordPrompts=1"
                 -o "PreferredAuthentications=password,keyboard-interactive,publickey"
                 "${3}@${1}" "echo $2 | base64 -d | bash -s -- $CAP_BYTES")
