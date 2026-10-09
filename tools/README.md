@@ -23,7 +23,7 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 
 | 文件 | 用途 |
 |---|---|
-| `log_fetch.sh` | **日志下载（推荐入口）**：一轮收全飞控 ulog + 机载 ROS 会话日志 + planner 诊断 + 终端转录 + 数据面观测/事件日志 |
+| `log_fetch.sh` | **日志下载（推荐入口）**：一轮收齐**我方程序**记的日志（机载 ROS 会话 / planner 诊断 / 终端转录 / 数据面观测与事件）；飞控 ulog **默认不采**（加 `--ulog` 才走 MAVLink，2026-10-09 改） |
 | `fcu_ulog_list.py` | 列飞控 SD 上的 ulog 清单（`LOG_REQUEST_LIST`），并把 `time_utc` 换算成本地时刻 |
 | `fcu_ulog_fetch.py` | 下载 ulog（`LOG_REQUEST_DATA` 分块 + 断点续传 + 进度 + stall 重试） |
 | `fcu_nsh.py` | 跑**只读** PX4 nsh 命令（`ls` / `mount` / `param show ...`），走 `SERIAL_CONTROL`；**不在下载链里**（见 §3.1） |
@@ -31,17 +31,20 @@ sudo apt install sshpass                 # 可选：机载 ssh 用密码（无�
 | `ulog_cmds.py` | ulog 内 `vehicle_command` 汇总，解码 `SET_GPS_GLOBAL_ORIGIN(48)` |
 | `onboard_clock_fix.sh` | 时钟修正：本机系统时钟 →（多次指定）机载系统时钟 → 机载 RTC（治「上电/重启回 1970」） |
 | `onboard_ctl.sh` | **机载栈远程启停**：`start/stop/status/logs` 多机扇出，实际动作调机载 `bashs/*_onboard.sh`（本机跑，见 §5.1） |
+| `router_service_install.sh` | **机载 mavlink-routerd 装成 systemd 服务**（逐台；取代桌面自启，见 `systemd/mavlink-routerd.service` 头部与 2026-09-23 报告 §1） |
 | `configs/onboard.env.example` | 机载账号/密码 + IP 规则模板（`onboard_clock_fix.sh` / `log_fetch.sh` / `onboard_ctl.sh` **共用同一份**） |
 | `configs/onboard.env` | 上者的本地实参（含明文密码，已 gitignore；别提交、别 push） |
 
 
-## 2. `log_fetch.sh`：日志下载（一轮收全，推荐入口）
+## 2. `log_fetch.sh`：日志下载（一轮收齐，推荐入口）
 
-一轮实机测试的日志散在三处，本脚本一把收齐。**本轮范围（最小档）**：
+一轮实机测试的日志散在多处，本脚本一把收齐。**默认只收"我们自己程序记的日志"**；
+飞控 ulog 是飞控自己记的、体积大且走 MAVLink 慢——**默认不采**，需要时加 `--ulog`
+（或自行接线读、用 `fcu_ulog_*.py`）。
 
 | 层 | 收什么 | 来源 |
 |---|---|---|
-| 飞控 | `fcu/ulog_list.txt`（全清单，含 GPS UTC）、`fcu/log_<id>.ulg`（最新 N 条）、`fcu/ulog_fetch.log` | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（固定 UDP `:15500`） |
+| 飞控（仅 `--ulog`） | `fcu/ulog_list.txt`（全清单，含 GPS UTC）、`fcu/log_<id>.ulg`（最新 `-n N` 条）、`fcu/ulog_fetch.log` | MAVLink `LOG_REQUEST_LIST` / `LOG_REQUEST_DATA`（固定 UDP `:15500`） |
 | 机载 | `onboard/ros_home/<session>/`（rosout、各节点、master、roslaunch） | ssh：`~/catkin_swarm6-2/.ros_home/log/<最新 session>/` |
 | 机载 | `onboard/ego_planner/*.log`（planner 诊断，即 `diagnostic_log_dir`） | ssh：`~/catkin_swarm6-2/.ros_home/log/ego_planner/` |
 | 机载 | `onboard/term/*_offboard_ego.log`（终端全量转录，§5.1.2 方式 B） | ssh：`~/catkin_swarm6-2/.tmp/logs/` |
