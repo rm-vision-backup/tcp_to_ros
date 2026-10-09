@@ -1,0 +1,20 @@
+<launch>
+  <!-- A 组三机工程测试地面站入口（A08 领机 / A10 / A13）。
+
+       与四机入口的关系：**只换两份测试专用配置**——formation_offsets_file 与
+       calibration_config_file——其余（bridge / 身份映射 / topology / 端口 / 安全门禁）
+       全部沿用 gcs_a_real_four_uav.launch 展开的那套，因此这里直接 include 它并
+       覆盖两个 arg，不再抄第三份展开副本（four_uav 那份的「逐段比对」负担不再叠加）。
+       四机入口自身仍是 gcs_a_real.launch / gcs_a_backend.launch 的展开副本，
+       那份副本的维护口径不变。
+
+       席位（2026-10-09）：12 号机缺席，本轮 = A08 领机 + A10/A13（与 09-22 三机轮
+       同阵容）；指挥关系、几何见 config/formation_offsets_three_uav.yaml 头注释。 -->
+
+  <include file="$(find tcp_to_ros)/launch/gcs_a_real_four_uav.launch">
+    <arg name="formation_offsets_file"
+         value="$(find tcp_to_ros)/config/formation_offsets_three_uav.yaml" />
+    <arg name="calibration_config_file"
+         value="$(find tcp_to_ros)/config/calibration_three_uav.yaml" />
+  </include>
+</launch>

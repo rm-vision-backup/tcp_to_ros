@@ -1,0 +1,18 @@
+# A 组三机工程测试专用标定集合（A08 领机 + A10/A13 -> UAV8/UAV10/UAV13）
+#
+# 为什么单开这份：2026-10-09 现场只启用 3 台（12 号机缺席）。四机配置
+# calibration_four_uav.yaml 的集合含 UAV12，而 ready 是 ALL 语义
+# （gcs_a_calibration_node.py:113-117）——缺机时整队永远不 ready，所以三机
+# 测试必须换一份三机集合。席位与 2026-09-22 三机轮同阵容（four_uav_recon/README §十）。
+#
+# 必须写执行层 UAVn，不能写任务层 Axx：
+# calibration.py:validate_calibration_config 依据 identity_file 校验每一项都是
+# 存在的 exec_target，写成 Axx 会在节点启动时直接 ValueError。
+#
+# 采样窗口 8.0 s：原因与四机配置完全相同（限频后 global 5 Hz，2.0 s 窗口在
+# 「样本数 >=5 且跨度 >=0.95*窗口」下结构性够不着，2026-09-23 实测 0/100）。
+# 详见 config/calibration_four_uav.yaml 的同名注释，此处不复述。
+
+calibration_uavs: [UAV8, UAV10, UAV13]
+all_uavs: [UAV8, UAV10, UAV13]
+sample_window_s: 8.0

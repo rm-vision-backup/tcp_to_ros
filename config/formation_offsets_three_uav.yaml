@@ -1,0 +1,49 @@
+# A 组三机工程测试专用编队配置（A08 领机 + A10/A13 跟随，5 m L 形）
+#
+# 为什么单开这份：2026-10-09 现场只启用 3 台（12 号机缺席）。四机配置
+# formation_4uav 的 participants 含 A12，而 FOLLOW_ROUTE 要求 participants
+# 精确匹配（gcs_a_backend_node.py:_formation_for_goal），缺机时会被
+# INVALID_FORMATION_* 拒 —— 三机测试必须换一份三机 formation。
+#
+# 3 机几何（沿用 four_uav_recon/README §1.2 的 5 m 栅格，去掉右前角 A12）：
+#   物理（以 A13 机位为参考）：A13(0,0)  A08(+5,0)  A10(0,+5)
+#   标定原点 = 三机全球位置逐轴中位数 = (0,0) = A13 机位
+#   → 任务坐标：A13(0,0) A08(+5,0) A10(0,+5)
+#   → 相对领机 A08 的 offset：A08(0,0) A10(-5,+5) A13(-5,0)
+#   —— A10/A13 的 offset 与四机配置逐值相同（少一台 A12 不影响其余机位）；
+#   —— prepare 目标（三机 package）与 offset 同源，编队就位后进入航线段水平位移≈0。
+#
+# 领机航线与四机轮同一份（x∈[-2.5,17.5]、y∈[-2.5,21.5]）；全队包络（任务坐标）：
+# 右 17.5、前 26.5（21.5 + A10 前偏 5）、左 7.5（-2.5 − A10/A13 左偏 5）、后 2.5、
+# 上 15（prepare 层）。
+#
+# offboard 语义与间距门禁同 formation_offsets_four_uav.yaml：
+# offset 是相对领机的 ENU 增量、不随领机 yaw 旋转（gcs_a_backend_node.py:1243-1246）；
+# 5.0 m 间距对执行层 min_center_distance_m = 1.0 留 4.0 m 余量。
+# 为什么不复用 config/formation_offsets.yaml：见 formation_offsets_four_uav.yaml
+# 注释（该文件 leader_id 是全局单值 A01，且被 12/15 机流程与单测锁定）。
+#
+# 通过 gcs_a_real_three_uav.launch 传入本文件（formation_offsets_file 参数）。
+
+leader_id: A08
+mission_anchor: [0.0, 0.0, 0.0]
+
+formations:
+  formation_3uav:
+    participants: [A08, A10, A13]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
+      A10: [-5.0, 5.0, 0.0]
+      A13: [-5.0, 0.0, 0.0]
+
+  # 以下两条供 1 机 / 2 机分步验证使用（与四机配置同惯例）。
+  formation_2uav:
+    participants: [A08, A10]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
+      A10: [-5.0, 0.0, 0.0]
+
+  formation_1uav:
+    participants: [A08]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
