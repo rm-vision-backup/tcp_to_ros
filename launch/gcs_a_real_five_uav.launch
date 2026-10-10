@@ -1,0 +1,18 @@
+<launch>
+  <!-- A 组五机工程测试地面站入口（A08 领机 / A10 / A12 / A13 / A06）。
+
+       与三机入口同构：**只换两份测试专用配置**——formation_offsets_file 与
+       calibration_config_file——其余（bridge / 身份映射 / topology / 端口 / 安全门禁）
+       全部沿用 gcs_a_real_four_uav.launch 展开的那套，因此这里直接 include 它并
+       覆盖两个 arg，不再抄第三份展开副本。
+
+       席位（2026-10-10）：四机阵容 + A06（炸机后修复归队）；几何、指挥关系与
+       prepare 目标见 config/formation_offsets_five_uav.yaml 头注释。 -->
+
+  <include file="$(find tcp_to_ros)/launch/gcs_a_real_four_uav.launch">
+    <arg name="formation_offsets_file"
+         value="$(find tcp_to_ros)/config/formation_offsets_five_uav.yaml" />
+    <arg name="calibration_config_file"
+         value="$(find tcp_to_ros)/config/calibration_five_uav.yaml" />
+  </include>
+</launch>

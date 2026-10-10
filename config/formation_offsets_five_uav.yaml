@@ -1,0 +1,58 @@
+# A 组五机工程测试专用编队配置（A08 领机 + A10/A12/A13/A06 跟随，5 m 十字布局）
+#
+# 为什么单开这份：五机轮（2026-10-10 决定）在四机阵容（A08+A10/A12/A13）基础上增加
+# A06（炸机后修复归队）。formation 的 participants 按精确集合匹配
+# （gcs_a_backend_node.py:_formation_for_goal），五机任务必须换一份五机 formation；
+# formation_4uav 与 formation_5uav 不可互借。
+#
+# 5 机几何（沿用 four_uav_recon/README §1.2 的 5 m 栅格，扩成十字）：
+#   物理（以 A13 机位为参考）：A13(0,0)  A08(+5,0)  A10(0,+5)  A12(-5,0)  A06(0,-5)
+#   标定原点 = 五机全球位置逐轴中位数 = (0,0) = A13 机位（十字布局的中位数落在中心机）
+#   → 任务坐标：A13(0,0) A08(+5,0) A10(0,+5) A12(-5,0) A06(0,-5)
+#   → 相对领机 A08 的 offset：A08(0,0) A10(-5,+5) A12(-10,0) A13(-5,0) A06(-5,-5)
+#   —— A10/A13 的 offset 与三机/四机配置逐值相同（其余机位不动）；
+#   —— prepare 目标（五机 package）与 offset 同源，编队就位后进入航线段水平位移≈0。
+#
+# 领机航线与历轮同一份（x∈[-2.5,17.5]、y∈[-2.5,21.5]）；全队包络（任务坐标）：
+# 右 17.5、前 26.5（21.5 + A10 前偏 5）、左 12.5（-2.5 − A12 左偏 10）、
+# 后 7.5（-2.5 − A06 后偏 5）、上 15（prepare 层）。
+#
+# offboard 语义与间距门禁同 formation_offsets_four_uav.yaml：
+# offset 是相对领机的 ENU 增量、不随领机 yaw 旋转（gcs_a_backend_node.py:1243-1246）；
+# 编队最小间距 5.0 m，对执行层 min_center_distance_m = 1.0 留 4.0 m 余量。
+# 为什么不复用 config/formation_offsets.yaml：见 formation_offsets_four_uav.yaml
+# 注释（该文件 leader_id 是全局单值 A01，且被 12/15 机流程与单测锁定）。
+#
+# 通过 gcs_a_real_five_uav.launch 传入本文件（formation_offsets_file 参数）。
+
+leader_id: A08
+mission_anchor: [0.0, 0.0, 0.0]
+
+formations:
+  formation_5uav:
+    participants: [A08, A10, A12, A13, A06]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
+      A10: [-5.0, 5.0, 0.0]
+      A12: [-10.0, 0.0, 0.0]
+      A13: [-5.0, 0.0, 0.0]
+      A06: [-5.0, -5.0, 0.0]
+
+  # 以下三条供 1/2/3 机分步验证使用（先小后大上五机；与三机/四机配置同惯例）。
+  formation_3uav:
+    participants: [A08, A10, A13]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
+      A10: [-5.0, 5.0, 0.0]
+      A13: [-5.0, 0.0, 0.0]
+
+  formation_2uav:
+    participants: [A08, A10]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
+      A10: [-5.0, 0.0, 0.0]
+
+  formation_1uav:
+    participants: [A08]
+    offsets:
+      A08: [0.0, 0.0, 0.0]
