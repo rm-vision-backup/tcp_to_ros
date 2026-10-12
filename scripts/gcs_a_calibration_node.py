@@ -38,7 +38,9 @@ class GcsACalibrationNode:
                       identity_file or "(none)")
         self.sample_window_s = float(rospy.get_param("~sample_window_s", 2.0))
         self.min_samples = int(rospy.get_param("~min_samples_per_uav", 5))
-        self.sample_max_age_s = float(rospy.get_param("~sample_max_age_s", 2.0))
+        # 2026-10-11：无线链路拥塞时 pose 会出现 1–4 s 空档（GCS 桥 health gap_max>4 s），
+        # 2.0 s 会把"静止标定"误判为不新鲜。飞机在地面静止，放宽到 6.0 s 安全。
+        self.sample_max_age_s = float(rospy.get_param("~sample_max_age_s", 6.0))
         self.max_heading_error = math.radians(float(rospy.get_param("~max_heading_error_deg", 30.0)))
         self.positions = {uav: collections.deque() for uav in self.calibration_uavs}
         self.headings = {uav: collections.deque() for uav in self.calibration_uavs}
@@ -105,7 +107,8 @@ class GcsACalibrationNode:
             values = [value for stamp, value in table[uav] if now - stamp <= self.sample_window_s]
             if len(values) < self.min_samples or not table[uav] or now - table[uav][-1][0] > self.sample_max_age_s:
                 return None
-            if table[uav][-1][0] - table[uav][0][0] < self.sample_window_s * 0.95:
+            # 跨度门槛 0.95→0.5：静止标定对采样连续性不敏感，容忍链路造成的窗口内空档。
+            if table[uav][-1][0] - table[uav][0][0] < self.sample_window_s * 0.5:
                 return None
             result[uav] = values
         return result
