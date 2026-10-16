@@ -1,7 +1,8 @@
 # plans 目录（入口）
 
-> 本目录是 `tcp_to_ros` 项目的开发入口：维护 **Phase 编号约定**、**全局设计规约**、
-> **实施计划**与**当前状态**。新会话从此文件开始阅读。
+> 本目录是 `tcp_to_ros` 的 **Phase 编号、设计决策与实施计划索引**，不是实机操作入口。
+> 2026-10-16 复核：下文大部分状态是按日期保留的历史里程碑；当前行为须核对源码、配置及最新实测记录。
+> 日常上机先读总工作区 [实机测试工作流](../../../verification/real_uav_workflow/README.md)。
 > 计划文件名规范：`implementation_plan_yymmddhh.md`；测试记录文件名规范：`test_records/test_record_yymmddhh.md`。
 > 其中 `yymmddhh` 为文件生成时间的两位年、两位月、两位日、两位小时（24 小时制）。
 
@@ -31,8 +32,9 @@
 
 ### 任务模型与唯一键
 
-- Group A 固定 15 架（A01..A15），A13..A15 为恢复/接替集（RESERVE）；默认 6 个整组批次：
+- 默认联合候选包使用 15 个 A 组身份（A01..A15），A13..A15 为恢复/接替集（RESERVE）；默认 6 个整组批次：
   `prepare-a`、`coverage-segment-1`、`fault-exit`、`recovery-a`、`coverage-segment-2`、`hold-a-end`。
+- 该默认包不限制工程测试机队；三/四/五机使用各自专用 formation、标定集合和任务包，不能只删飞机而沿用旧配置。
 - 任务唯一键固定为：`(mission_id, command_id, uav_id)`。
 - 完成策略 `ALL`：任一参与机拒绝/超时/链路 LOST 即整组失败并安全 HOLD 其他活动参与机。
 - 单机任务全结构化字段（无 `payload_json`）；`accepted=true` 只表示校验、幂等登记并交给本机执行入口。
@@ -65,12 +67,13 @@ GCS_A 必须：
 
 ### 安全基线（不可弃用）
 
-- arm/OFFBOARD 软件所有权属于外部本机脚本 `offboard_takeoff_15_sitl.py`，不属于 executor 或 GCS START。
-- 起飞顺序固定为：完成标定 → 脚本 HOLD（拒绝时回退 AUTO.LOITER）→ arm → OFFBOARD → planner TAKEOFF
+- arm/OFFBOARD 不属于 executor 或 GCS START：实机由现场飞手完成，SITL 使用 `offboard_takeoff_15_sitl.py`。
+- 起飞顺序为：完成标定 → 外部 arm/OFFBOARD（SITL 脚本先 HOLD，拒绝时回退 AUTO.LOITER）→ planner TAKEOFF
   软起飞至 5m → HOLD → executor PREPARE 只检查 armed/OFFBOARD/origin → GCS START 启动已登记任务。
   START 不触发按需起飞，5m TAKEOFF 不属于 MOVE_TO 子阶段。
-- GCS_A 在任务前用 A01-A06 全球位置中位数与圆周平均航向冻结标定结果，A01-A15 原点回读全部确认前拒绝后续流程；
-  A01-A12 仍是 formation-1/prepare/coverage 成员集，不得替换为 A01-A06。
+- GCS_A 用当前 `calibration_uavs` 集合的全球位置中位数与圆周平均航向冻结标定，ready 要求该计算集合原点回读确认；
+  `all_uavs` 是确认记账全集，不要求缺席飞机全在线。每架任务参与机仍须核对原点确认，不能只看全局 ready。
+  默认联合包的标定计算集与 prepare/coverage 成员集不同，工程测试以对应专用配置为准。
 - `mission_anchor` 固定为 `(0,0,0)`，与当前配置及源码坐标变换一致。
 - 统一球形距离门禁：planner hard-clearance 对预测轨迹同刻 3D 中心距 `<1.0m` 判失败；executor runtime gate
   对 fresh odom 的 3D 中心距 `<1.0m` 触发 HOLD；SafetyPredictor 采用更保守的 `<=1.0m` 边界。
@@ -89,7 +92,7 @@ GCS_A 必须：
 | `implementation_plan_26082602.md` | 避碰门槛解耦（固定 clearance）+ 定时/周期碰撞检查 replan 机制 | **已实施（2026-08-26，代码+单测 232 tests 0 failure；双机 SITL 验收待执行）** |
 | `implementation_plan_26082621.md` | plan-exec 循环重构（3m keypoints + 相邻目标）+ 单一 replan 入口 + EMERGENCY 走 replan（方案 Y） | **已实施（2026-08-26，代码+单测 257 tests 0 failure；SITL 双机验收进行中）** |
 | `implementation_plan_26082722.md` | 轨迹末端 OOM 根因修复：`[0,T]` 有界采样、资源上限、single-QR、结果分流与内存回归 | **已实施（2026-08-28，代码+单测+PSI；全量 295 tests 0 failure；15-UAV prepare 验收进行中）** |
-| `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **计划已建立，未实施** |
+| `implementation_plan_26082916.md` | 功能包参数配置整理与规范化：参数真源、YAML/launch 接线、范围校验与参数审计 | **已实施（2026-08-29）**，见下文「状态-26082916」；原表“未实施”已过时 |
 | `implementation_plan_26083018.md` | 参数配置规范化与 `safe_valley_exp` 拆包 | **已实施** |
 | `implementation_plan_26090106.md` | `MOVE_TO`/`FAULT_EXIT` 基于水平路径安全区间与 t_off 方差优化的 GCS 启动时序协调 | **已实施（2026-09-01，代码+单测 20/20；prepare 五次干净重启验收 0/5，失败均为机载 intent/监督，见 test_record_26090106）** |
 | `implementation_plan_26090802.md` | 安全事件优先完成、目标代次校验、retry 0.6s×5、直接锁存 BRAKE_HOLD、唯一实时距离锁存、组级安全广播 | **曾实施（2026-09-08），当日源码回退至实施前；计划正文保留（见 状态-26090802）** |
@@ -99,9 +102,16 @@ GCS_A 必须：
 | `implementation_plan_26091316.md` | `ego_planner_driver` 基于起始位姿反馈的 5m 闭环软起飞：锁存起点、限速参考、反馈稳定到达后 HOLD | **暂不执行（2026-09-13 评估，计划正文保留）**：真因已定位并解决——2026-09-11 实机起飞 setpoint/thrust 震荡为开机自启动程序 `offb_hover.py` 与我方 `setpoint_relay` 双发布者争抢 `/mavros/setpoint_raw/local`，**非**开环斜坡所致；清除外部发布者后实机 5m 软起飞实测正常。见 §状态-26091316 |
 
 > 更早实施计划（26080804..26081406）与早期测试记录已归档删除，设计沉淀在本 README
-> 规约与「当前状态」段。被审计冻结基准不回填修改；本 README「当前状态」段为唯一实时权威。
+> 规约与历史状态段。被审计冻结基准不回填修改；历史测试数字不自动更新为当前验收结果。
 
-## 当前状态（实时）
+## 当前状态入口（2026-10-16 复核）
+
+- 用户说明三机实飞已通过；10-12 跨话题 bundle 已实现并做过自动测试/双 Master 回环，尚未完成合包实机验收。
+- 实机默认 `packing=bundle`、10 Hz tick、`swarm_pose` 10 Hz；GCS 与所有参与节点须一致，逐对端扇出仍存在，不宣称已解决 30+ 机容量。
+- router systemd 与去 `.242:15500`：已出现的 UAV 按用户说明已修改；新机首次配置，每轮只读复核。
+- 实物证据查总工作区 `src/uav_log/`、`quality_reports/`；流程查上机工作流，当前参数以实际加载 YAML/launch 为准。
+
+### 历史实现与验证里程碑（各条按自身日期解读）
 
 - **已落地**：A01-A06 全员原点/航向计算门禁、A01-A15 原点回读确认、`mission_anchor=(0,0,0)`
   任务右-前-上变换、固定编队 1/2 精确集合、内部 PREPARE/START/ABORT、外部脚本 arm/OFFBOARD、

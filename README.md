@@ -4,6 +4,8 @@
 > 它不是单包 README，而是 `catkin_swarm6-2` 工作空间的入口：说明项目目标、架构、
 > 当前实现进度、测试步骤，以及换设备/换 workspace 编译运行时的注意点。
 > 单包细节与历史过程见文末「文档索引」。
+> 2026-10-16 文档复核：现场操作先执行总工作区的 [上机工作流](../../verification/real_uav_workflow/README.md)；
+> 本文第 3 节是历史里程碑，第 4 节旧 15 机步骤是 SITL 示例，不是当前机队的实飞命令。
 
 ---
 
@@ -38,7 +40,7 @@ UAV1–UAV16），参与机全部回读确认 `gp_origin` 后才开放任务。A
 
 ```text
 catkin_swarm6-2/
-├── src/                    开发代码（6 个独立 git 仓库，不 push）
+├── src/                    开发代码（6 个独立 Git 子模块）
 │   ├── tcp_to_ros/             GCS_A 地面站主包（本文档所在包）
 │   │   └── tools/              实机运维工具（日志下载/分析、时钟修正；非 ROS 节点，不参与构建）
 │   ├── swarm_uav_interfaces/   共享 ROS msg/srv 契约（所有机必须同版本）
@@ -47,20 +49,21 @@ catkin_swarm6-2/
 │   ├── ego_planner_driver/     C++ ego-swarm 风格轨迹驱动（B-spline + L-BFGS + 互惠避碰）
 │   └── swarm_simulation/       Gazebo/PX4 SITL 仿真环境层（4/15 机 launch，26083018 拆包新增）
 ├── references/             只读参考资料（runtime 行为树、docs 方案、ego-planner-swarm 原版）
-├── verification/           工程验证脚本（不属于任何 git 仓库；ego_smoke、acceptance、plot 脚本）
+├── verification/           主仓维护的工程验证脚本与上机工作流
 ├── .ros_home/              统一 ROS 日志目录（避免散落 ~/.ros）
 ├── build/ devel/ logs/     catkin 构建产物
 └── docs 相关              （见 src/tcp_to_ros/test_records 与 plans）
 ```
 
-**重要**：`references/` 是参考而不是开发文件夹，改动一律不入 git；`verification/` 是工程验证脚本，
-不属于任何 `src/*` 仓库；开发只改 `src/` 下六个仓库。
+**仓库边界**：`src/*` 的六个包及 `references/runtime`、`references/DAG-GCBF` 为独立 Git 子模块；
+`verification/`、`claude.md` 属于主仓。参考仓原则上按任务范围维护，不自动覆盖或改写历史；
+涉及提交时先各子仓、后主仓同步指针，具体约定见总工作区 `claude.md`。
 
 ---
 
 ## 3. 当前实现进度（历史里程碑）
 
-> 详细实时状态以 `plans/README.md`「当前状态」为唯一权威；以下为本工作空间的早期里程碑摘要，
+> 设计演进见 `plans/README.md`，当前行为以源码、实际配置与最新实测证据核对；以下为早期里程碑摘要，
 > 具体演进见 `plans/README.md` 与 `test_records/`。
 
 ### 已实现并验证
@@ -75,7 +78,7 @@ catkin_swarm6-2/
 | link_health + safe_hold | ✅ | 替代已删除的 lease 机制：节点丢失 → backend 判定 LOST → 全悬停 → 手动接管 |
 | 飞行安全租约（lease） | ❌ 已删除 | 时延敏感（renew 0.9s）+ 锁存难恢复，仿真与自组网实机都不可用；决策见 plans/README.md |
 
-### 关键 bug 修复（本会话）
+### 当时的关键 bug 修复（历史）
 
 1. **hold 捕获与待规划 goal 竞态**（ego_planner_driver `192ad03`）：空闲 HOLD 下 `publishSetpoint` 在
    `onGoal` 清除 `steady_target_` 后立即重新捕获，导致 `replanLoop` 因 `steady_target_` 非空永不规划，
@@ -83,7 +86,7 @@ catkin_swarm6-2/
 2. **emergency_hold 崩溃**（tcp_to_ros `09a9e44`）：`cancel_goal_at_server` 是 client API，server 无此方法，
    超时/取消路径崩溃。修复：设置 `stop_event` 让执行线程自行发布终态。
 
-### 未完成 / 待办
+### 当时未完成的事项（不作当前待办）
 
 - prepare 六批次端到端重跑（竞态修复后尚未重跑；此前因竞态 TIMEOUT）
 - 断 bridge → link_health LOST → safe_hold 全悬停的故障注入验证
@@ -93,7 +96,8 @@ catkin_swarm6-2/
 
 ## 4. 测试步骤
 
-最新实测记录（含步骤-预期-结果、可复制命令）见：
+当前实机步骤见总工作区上机工作流和 `verification/*_uav_recon/README.md`，实飞原始证据在 `src/uav_log/`。
+下列为早期验证记录，保留用于回溯，不能称为最新实测：
 
 ```text
 src/tcp_to_ros/test_records/test_record_26082400.md   （PVA 链路验收）

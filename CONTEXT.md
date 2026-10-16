@@ -1,10 +1,9 @@
 # Context Glossary
 
 > 本文件是项目领域词汇表，只解释概念、不承载文件路径、实现算法与验证参数。
-> - Phase 编号约定、全局设计规约、文档索引与当前状态（唯一权威）：`plans/README.md`
-> - 当前实施计划：`plans/implementation_plan_26082415.md`（基线 `26082300`/`26082322`）
-> - 近期测试记录：`test_records/test_record_26082400.md` / `test_records/test_record_26082300.md`
-> - 包关系：`tcp_to_ros` 为 GCS_A 地面站业务包；`swarm_uav_interfaces` 为 GCS 与机载共同依赖的纯 ROS 接口包；`swarm_uav_executor` 为每架 UAV 本机部署的执行适配包；三者是相互独立的 Git 仓库。`swarm_topology_bridge` 是不解释 command 的通用通信包。工作空间根目录不拥有这些仓库，也不将两个新包登记为 submodule。
+> - Phase 编号与设计演进索引：`plans/README.md`；当前实现以源码/配置与最新验证记录核对。
+> - 上机执行入口：总工作区 `verification/real_uav_workflow/README.md`；实飞证据：`src/uav_log/`。
+> - 包关系：`tcp_to_ros`、`swarm_uav_interfaces`、`swarm_uav_executor`、`swarm_topology_bridge` 均为总工作区登记的独立 Git 子模块；分别负责 GCS 业务、共享接口、机载执行和通用通信，不混用职责。
 
 ## Group A
 
@@ -37,9 +36,10 @@
 
 指已经被 GCS_A 收到有效链路心跳、可形成健康观察的 UAV 集合。未上电且从未被发现的配置成员不应被伪报为链路丢失。
 
-## 飞行会话集
+## 飞行会话集（旧术语）
 
-指已建立飞行安全租约且尚未安全结束的 UAV 集合。它可以跨越同一 mission 的多个任务批次，因此不等同于当前任务参与集。
+原指建立飞行安全租约的 UAV 集合；lease 机制已删除，不作为当前执行门禁或收口目标集合。
+当前应分别使用“任务参与集”“配置全集”和“当前在线集”。
 
 ## 分发层
 
@@ -135,15 +135,15 @@
 
 ## 共享机载接口包
 
-指 `swarm_uav_interfaces`。它只拥有 GCS 与机载共同使用的任务、状态、链路健康和飞行安全租约接口定义，不包含 GCS 聚合、机载动作或 bridge 业务逻辑。
+指 `swarm_uav_interfaces`。它拥有 GCS 与机载共同使用的任务、状态、链路健康接口定义，不包含 GCS 聚合、机载动作或 bridge 业务逻辑。历史 lease 定义的保留不表示仍启用租约机制。
 
 ## 单机执行器
 
-指 `swarm_uav_executor`。每个实例在启动时绑定唯一且不可变的任务身份与执行身份，只能连接和控制本机动作 driver。其他 UAV 信息未来只能作为感知或避碰输入，不能形成跨机控制权。
+指 `swarm_uav_executor`。每个实例在启动时绑定唯一且不可变的任务身份与执行身份，只能连接和控制本机动作 driver。邻机位姿与轨迹意图用于编队/避碰输入，不构成对邻机的控制权。
 
 ## 动作 driver
 
-指单机执行器与具体运动实现之间的可替换端口。首版实现确定性 mock 与 direct MAVROS position-setpoint；未来 EGO Planner、航线和编队能力通过新 driver 或上层协调器接入，不改变冻结的跨机接口。
+指单机执行器与具体运动实现之间的可替换端口。当前包含 mock、`mavros_position` 兼容路径及正式 EGO 链路的 `ego_swarm`；EGO 路径已接入航线和 follower PI，不再是待接入设想。
 
 ## direct MAVROS driver
 
