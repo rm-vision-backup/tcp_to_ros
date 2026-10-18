@@ -9,7 +9,9 @@
 # 参数与现场定稿脚本（~/Mavlink_Routerd_Sh/Mavlink-route.sh，2026-09-23 版）基本一致；
 # 差别：① 2026-10-10 起去掉 `-e 192.168.5.242:15500`——.242 无任何消费者（本机 mavros 走
 # 127.0.0.1、GCS 走 .241），是飞控遥测（~46 KB/s/机）在空口上的纯冗余拷贝，见 2026-09-22
-# 报告 §5.3 与 2026-10-10 三机链路停摆分析报告；② 以 root 运行，不再需要先
+# 报告 §5.3 与 2026-10-10 三机链路停摆分析报告；② 2026-10-18 起去掉
+# `-e 192.168.5.241:15500`——GCS 侧没有 MAVLink 消费者，转发遥测会显著抬高电台包率；
+# 只保留 127.0.0.1:15500 供本机 mavros 使用；③ 以 root 运行，不再需要先
 # `chmod 777 /dev/ttyTHS0`；也不再需要"前台阻塞"那种约束。
 #
 # 部署：bash src/tcp_to_ros/tools/router_service_install.sh 8 10 13   （从 GCS 跑，逐台）
@@ -18,13 +20,13 @@
 # 日志：journalctl -u mavlink-routerd -b
 
 [Unit]
-Description=mavlink-routerd (UAV onboard MAVLink router: FCU UART <-> GCS 15500 / local mavros)
+Description=mavlink-routerd (UAV onboard MAVLink router: FCU UART <-> local mavros)
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/home/nvidia/Mavlink_Routerd_Sh
-ExecStart=/home/nvidia/Mavlink_Routerd_Sh/mavlink-routerd -e 192.168.5.241:15500 -e 127.0.0.1:15500 /dev/ttyTHS0:921600
+ExecStart=/home/nvidia/Mavlink_Routerd_Sh/mavlink-routerd -e 127.0.0.1:15500 /dev/ttyTHS0:921600
 Restart=always
 RestartSec=2
 StandardOutput=journal
