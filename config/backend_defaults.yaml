@@ -42,7 +42,9 @@ schedule_geometric_distance_m: 1.3    # 排程几何安全距离（m，>0）：�
 schedule_safety_margin_m: 1.0         # 排程安全裕度（m，>=0）：吸收定位/通信/启动/跟踪误差，
                                       #   实测终点偏差 0.2-0.7m（test_record_26082400）；当前取 1.0m，
                                       #   d_ij = 1.3 + 1.0 = 2.3m（比默认 0.5m 更保守）
-schedule_pose_timeout_s: 1.0          # 位姿新鲜度阈值（s，>0）：超过该时长 pose 判过期（计划 §5.2）
+schedule_pose_timeout_s: 2.0          # 位姿新鲜度阈值（s，>0）：超过该时长 pose 判过期（计划 §5.2）
+                                      #   2026-10-19 由 1.0 放宽：覆盖实测 1.1–2 s 链路空档；
+                                      #   排程仍只用最近一次有效位姿，起点不再更新的批次照常拒绝
 schedule_time_epsilon_s: 1e-6         # 排程数值容差（s，>0）：区间边界/距离比较的浮点容差
 schedule_max_start_delay_s: 30.0      # 最大启动延迟（s，>0）：限制 max(tau_i')，超限排程前置失败（计划 §5.4）
 schedule_max_interval_combinations: 2000  # 区间组合搜索上限（int，>0）：达到上限停止，标记非全局最优
